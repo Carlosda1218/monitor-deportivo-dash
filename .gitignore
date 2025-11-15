@@ -1,0 +1,7 @@
+﻿venv/
+__pycache__/
+*.bak
+*.db-wal
+*.db-shm
+.DS_Store
+/.vscode/

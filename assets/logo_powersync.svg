@@ -1,0 +1,6 @@
+﻿<!-- logo_powersync.svg (placeholder) — puedes reemplazar por tu logo final -->
+<svg width='128' height='128' viewBox='0 0 128 128' xmlns='http://www.w3.org/2000/svg' fill='none'>
+  <rect width='128' height='128' rx='20' fill='#121722'/>
+  <path d='M20 68h24l8-16 10 26 12-22h18l6-10h8' stroke='#34D7E0' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/>
+  <path d='M70 18l-22 40h18l-4 30 24-42H68l2-28z' fill='#FF4D4D'/>
+</svg>

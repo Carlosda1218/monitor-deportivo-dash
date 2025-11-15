@@ -1,0 +1,208 @@
+﻿/* ===============================
+   PowerSync — Neon ECG Theme
+   =============================== */
+
+:root{
+  /* Paleta */
+  --bg:#0a0f14;
+  --bg-2:#0c1219;
+  --card:#101722cc;         /* con transparencia para efecto glass */
+  --ink:#e7ecf3;
+  --muted:#97a3af;
+  --line:#243042;
+
+  --neon:#00f28a;           /* verde ECG principal */
+  --neon-soft:#00c971;
+  --cyan:#34D7E0;
+  --punch:#FF4D4D;
+  --violet:#7C3AED;
+
+  /* FX */
+  --glow:0 0 14px rgba(0,242,138,.45), 0 0 26px rgba(0,242,138,.25);
+  --glow-soft:0 0 10px rgba(0,242,138,.25);
+}
+
+html, body, #_dash-app-layout, #_dash-app-content {
+  height:100%;
+  background:
+    radial-gradient(1200px 800px at 10% -10%, rgba(0,242,138,.06), transparent 60%),
+    radial-gradient(1000px 700px at 90% 120%, rgba(52,215,224,.08), transparent 60%),
+    linear-gradient(180deg, #0a0f14 0%, #0b1016 100%);
+  color:var(--ink);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing:.2px;
+}
+
+/* Sutil grid de monitor al fondo */
+body::before{
+  content:"";
+  position:fixed; inset:0;
+  background:
+    linear-gradient(rgba(36,48,66,.22) 1px, transparent 1px) 0 0 / 44px 44px,
+    linear-gradient(90deg, rgba(36,48,66,.22) 1px, transparent 1px) 0 0 / 44px 44px;
+  mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,.25), transparent 70%);
+  pointer-events:none;
+}
+
+/* -------- Sidebar -------- */
+#sidebar{
+  position:fixed; top:0; left:0; width:272px; height:100%;
+  background:
+    linear-gradient(180deg, rgba(16,23,34,.85) 0%, rgba(10,15,20,.92) 100%);
+  border-right:1px solid var(--line);
+  padding:20px 16px; box-sizing:border-box;
+  backdrop-filter: blur(8px);
+}
+.app-title, #sidebar .app-title{
+  display:flex; align-items:center; gap:10px;
+  font-weight:800; font-size:20px; letter-spacing:.3px;
+  text-shadow: var(--glow-soft);
+}
+.app-title img{height:22px;width:22px; filter: drop-shadow(var(--glow-soft));}
+
+.nav-link{
+  display:block; padding:12px 14px; margin:6px 0;
+  color:var(--ink); text-decoration:none!important;
+  border-radius:12px; border:1px solid transparent;
+  background:transparent; transition:all .18s ease;
+}
+.nav-link:hover{ background:#131c29; border-color:#1f2a3a; }
+.nav-link.active{ background:#152235; border-color:#213149; box-shadow: inset 0 0 0 1px #213149; }
+
+.badge-role{
+  font-size:12px; padding:4px 10px; border-radius:999px;
+  color:#07150f; background:linear-gradient(90deg, var(--neon-soft), var(--neon));
+  box-shadow: var(--glow-soft);
+}
+
+/* -------- Contenido principal -------- */
+#page-content{ margin-left:272px; padding:22px; }
+
+/* -------- Cards / Contenedores -------- */
+.card{
+  background:var(--card);
+  border:1px solid rgba(36,48,66,.7);
+  border-radius:16px; padding:18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.02);
+  backdrop-filter: blur(6px);
+}
+.card:hover{ border-color:#324055; }
+
+/* Divider con línea ECG */
+.ecg-divider{
+  height:2px; width:100%;
+  background:
+     radial-gradient(closest-side, rgba(0,242,138,.55), transparent) center/8px 8px repeat-x,
+     linear-gradient(90deg, rgba(0,242,138,.9), rgba(0,242,138,.25));
+  filter: drop-shadow(0 0 10px rgba(0,242,138,.45));
+  border-radius: 2px;
+}
+
+/* -------- Tipografía -------- */
+h1,h2,h3{ margin:6px 0 12px; font-weight:800; letter-spacing:.2px; }
+h2{ font-size:22px; }
+
+/* -------- Inputs / Controles -------- */
+label{ color:var(--muted); font-size:13px; }
+
+input, select, textarea{
+  background:#0d131b; color:var(--ink);
+  border:1px solid #283142; border-radius:12px;
+  padding:10px 12px; width:100%;
+  transition:border .15s ease, box-shadow .15s ease;
+}
+input:focus, select:focus, textarea:focus{
+  outline:none;
+  border-color: var(--neon);
+  box-shadow: 0 0 0 3px rgba(0,242,138,.18);
+}
+
+/* Dash Dropdown */
+.Select-control{ background:#0d131b!important; border-color:#283142!important; border-radius:12px!important; }
+.is-focused .Select-control{ border-color:var(--neon)!important; box-shadow:0 0 0 3px rgba(0,242,138,.18)!important; }
+.Select-menu-outer{ background:#0f151e!important; border:1px solid #283142!important; }
+
+/* Sliders (dcc.Slider) */
+.rc-slider{ padding:10px 0 6px; }
+.rc-slider-rail{ background:#1f2937; }
+.rc-slider-track{ background: linear-gradient(90deg, var(--neon-soft), var(--neon)); box-shadow: var(--glow-soft); }
+.rc-slider-handle{ border-color:var(--neon)!important; box-shadow: var(--glow)!important; }
+.rc-slider-handle:hover{ border-color:var(--neon)!important; }
+
+/* Checklist y Radios */
+input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
+
+/* -------- Botones -------- */
+.btn{
+  padding:11px 14px; border-radius:12px; border:none; cursor:pointer;
+  font-weight:700; letter-spacing:.2px;
+}
+.btn-primary{
+  color:#051b12; background: linear-gradient(90deg, var(--neon-soft), var(--neon));
+  box-shadow: var(--glow);
+}
+.btn-primary:hover{ filter: brightness(1.05); }
+.btn-ghost{
+  color:var(--ink); background:transparent; border:1px solid #2b3a52;
+}
+.btn-ghost:hover{ border-color:#3a4d69; }
+.btn-danger{
+  color:#fff; background: linear-gradient(90deg, #ff6b6b, var(--punch));
+  box-shadow: 0 0 12px rgba(255,77,77,.28);
+}
+.btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+/* -------- KPIs — estilo “neón ECG” -------- */
+.kpis{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; }
+.kpi{
+  position:relative; overflow:hidden;
+  background: linear-gradient(180deg, rgba(16,23,34,.85), rgba(12,18,25,.85));
+  border:1px solid #2a384c; border-radius:16px; padding:14px 16px;
+}
+.kpi::before{
+  content:""; position:absolute; inset:0; opacity:.6; pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(0,242,138,.12), transparent 30%, transparent 70%, rgba(0,242,138,.12)),
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  mask-image: radial-gradient(120% 60% at 50% 0%, #000, transparent 70%);
+}
+.kpi-label{ color:var(--muted); font-size:12px; }
+.kpi-value{
+  font-size:28px; font-weight:900;
+  color:var(--neon); text-shadow: var(--glow);
+}
+.kpi-sub{ font-size:12px; color:#b9c4cf; }
+
+/* Línea mini-ECG para KPIs */
+.kpi-ecg-line{
+  height:2px; width:100%; margin-top:8px;
+  background:
+    radial-gradient(closest-side, rgba(0,242,138,.8), transparent) center/7px 7px repeat-x,
+    linear-gradient(90deg, rgba(0,242,138,1), rgba(0,242,138,.2));
+  filter: drop-shadow(0 0 6px rgba(0,242,138,.55));
+}
+
+/* -------- Tablas (Dash DataTable) -------- */
+.dash-table-container .dash-spreadsheet{
+  background-color:transparent!important;
+}
+.dash-table-container .dash-spreadsheet-container{
+  border:1px solid #273246; border-radius:14px; overflow:hidden;
+}
+.dash-spreadsheet-menu{ background:#0f151e!important; }
+.dash-table-container .dash-spreadsheet td, 
+.dash-table-container .dash-spreadsheet th{
+  background:#121a26!important; color:var(--ink)!important; border-color:#233145!important;
+}
+.dash-table-container .dash-spreadsheet tr:hover td{
+  background:#172233!important;
+}
+
+/* -------- Plotly graphs -------- */
+.js-plotly-plot, .plotly, .main-svg{
+  background: transparent!important;
+}
+.modebar{ background-color: transparent!important; }
+
+/* Altura controlada para terminar con el bug de crecimiento infinito */
+.graph-fixed{ height:420px !important; }
