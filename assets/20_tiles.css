@@ -1,0 +1,20 @@
+
+:root{
+  --bg:#070B14; --surface:#0B1220; --primary:#1EA7FF; --text:#D7E0EF; --accent:#18FFB2;
+}
+html,body{height:100%; margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,system-ui;}
+.sidebar{position:fixed; inset:0 auto 0 0; width:260px; background:#0A0F1A; padding:24px 18px; border-right:1px solid rgba(30,167,255,.15);}
+.logo{font-weight:700; letter-spacing:.5px; font-size:22px; margin-bottom:16px;}
+.side-link{display:block; padding:10px 8px; color:var(--text); text-decoration:none; border-radius:10px;}
+.side-link:hover{background:rgba(30,167,255,.10);}
+.content{margin-left:260px; padding:26px;}
+.page-title{margin:0 0 14px 0; font-weight:600;}
+.muted{opacity:.8}
+.grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px;}
+.tile-link{text-decoration:none;}
+.tile-card{display:flex; gap:12px; align-items:center; background:linear-gradient(160deg,#0F172A,#0B1220);
+  border:1px solid rgba(30,167,255,.18); border-radius:16px; padding:18px; box-shadow:0 6px 18px rgba(0,0,0,.35);
+  transition:transform .15s, box-shadow .15s, border-color .15s;}
+.tile-card:hover{transform:translateY(-2px); box-shadow:0 10px 28px rgba(30,167,255,.20); border-color:var(--primary);}
+.tile-title{font-size:1.05rem; font-weight:600; color:var(--text);}
+.tile-icon{width:28px; height:28px; filter: drop-shadow(0 0 6px rgba(30,167,255,.25));}

@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 from flask import Flask, session
 import dash
-from dash import html, dcc, Input, Output, State, callback_context
+from dash import Dash, html, dcc, Input, Output, State, callback_context
 from dash.dash_table import DataTable
 from dash.exceptions import PreventUpdate
 
