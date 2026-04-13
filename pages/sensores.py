@@ -5,4 +5,7 @@ try:
     from sensors import calibration_layout as calib  # opcional si tienes layout de calibración
     layout = calib
 except Exception:
-    layout = html.Div([html.H1("Sensores & calibración"), html.P("Emparejar/batería/test de señal…")])
+    layout = html.Div([
+        html.H1("Sensores del producto"),
+        html.P("Sensores principales, sensores opcionales y configuración básica.")
+    ])
