@@ -2680,7 +2680,7 @@ def _coach_jornada_layout_v2(uid_int: int, sport: str):
                 ],
             ),
         ],
-        className="page-content session-shell",
+        className="page-content session-shell coach-shell",
     )
 
 

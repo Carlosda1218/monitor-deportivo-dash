@@ -2308,3 +2308,109 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
 }
 
 .ai-note li { margin-bottom: 4px; }
+
+/* ================================================================
+   Coach Shell — sistema de color amber independiente del atleta
+   Aplica sobre cualquier wrapper con clase .coach-shell
+   ================================================================ */
+
+:root {
+  --coach:      #f0a832;
+  --coach-soft: #c8881e;
+  --coach-glow: 0 0 12px rgba(240,168,50,.20);
+}
+
+/* Pills de cabecera */
+.coach-shell .session-pill {
+  color: var(--coach);
+  background: rgba(240,168,50,.10);
+  border-color: rgba(240,168,50,.30);
+}
+
+/* Hero gradient (fondo de la tarjeta hero) */
+.coach-shell .session-hero,
+.coach-shell .profile-hero {
+  background:
+    radial-gradient(circle at top right, rgba(240,168,50,.14), transparent 34%),
+    linear-gradient(180deg, rgba(22,30,41,.98), rgba(16,22,31,.96));
+}
+
+/* KPI — valor numérico */
+.coach-shell .kpi-value {
+  color: var(--coach);
+  text-shadow: var(--coach-glow);
+}
+
+/* KPI — línea decorativa inferior */
+.coach-shell .kpi-ecg-line {
+  background:
+    radial-gradient(closest-side, rgba(240,168,50,.42), transparent) center/7px 7px repeat-x,
+    linear-gradient(90deg, rgba(240,168,50,.62), rgba(240,168,50,.18));
+  filter: drop-shadow(0 0 6px rgba(240,168,50,.28));
+}
+
+/* KPI — brillo interno */
+.coach-shell .kpi::before {
+  background:
+    linear-gradient(90deg, rgba(240,168,50,.10), transparent 30%, transparent 70%, rgba(240,168,50,.10)),
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+}
+
+/* Collapsible chevron */
+.coach-shell .collapsible-card__chevron {
+  color: var(--coach);
+}
+
+/* ECG divider */
+.coach-shell .ecg-divider {
+  background:
+    radial-gradient(closest-side, rgba(240,168,50,.28), transparent) center/8px 8px repeat-x,
+    linear-gradient(90deg, rgba(240,168,50,.45), rgba(240,168,50,.14));
+  filter: drop-shadow(0 0 10px rgba(240,168,50,.18));
+}
+
+/* rc-slider track (sliders de check-in) */
+.coach-shell .rc-slider-track {
+  background: linear-gradient(90deg, var(--coach-soft), var(--coach));
+}
+.coach-shell .rc-slider-handle {
+  border-color: var(--coach) !important;
+  box-shadow: var(--coach-glow) !important;
+}
+.coach-shell .rc-slider-handle:hover {
+  border-color: var(--coach) !important;
+}
+
+/* Botón primario dentro de coach-shell */
+.coach-shell .btn-primary {
+  background: linear-gradient(90deg, var(--coach-soft), var(--coach));
+  box-shadow: 0 10px 24px rgba(240,168,50,.22);
+  color: #0d0d0d;
+}
+.coach-shell .btn-primary:hover { filter: brightness(1.05); }
+
+/* Badge de rol en sidebar (fuera de coach-shell, se aplica globalmente) */
+.badge-role--coach {
+  background: linear-gradient(90deg, var(--coach-soft), var(--coach));
+  color: #0d0d0d;
+}
+
+/* Borde izquierdo de grupo-header dentro de coach */
+.coach-shell .q-group-header {
+  border-left-color: var(--coach);
+  background: rgba(240,168,50,.06);
+}
+
+/* Nav link activo coach */
+.nav-link.active.coach-active {
+  background: rgba(240,168,50,.10);
+  border-color: rgba(240,168,50,.55);
+  box-shadow: 0 0 10px rgba(240,168,50,.10);
+}
+
+/* Sidebar toggle cuando es coach */
+.sidebar-toggle--coach {
+  background: var(--coach);
+  border-color: rgba(240,168,50,.55);
+  color: #0d0d0d;
+}

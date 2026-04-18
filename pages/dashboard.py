@@ -635,6 +635,31 @@ def _coach_followup_card(snapshot):
     )
 
 
+def _coach_profile_fold(title: str, hint: str, body_children, open_by_default: bool = False):
+    """Sección desplegable usada dentro del perfil del coach."""
+    from dash import html as _html
+    return _html.Details(
+        className="card collapsible-card",
+        open=open_by_default,
+        children=[
+            _html.Summary(
+                className="collapsible-card__summary",
+                children=[
+                    _html.Div(
+                        className="collapsible-card__head",
+                        children=[
+                            _html.H4(title, className="card-title"),
+                            _html.P(hint, className="text-muted"),
+                        ],
+                    ),
+                    _html.Span("⌄", className="collapsible-card__chevron"),
+                ],
+            ),
+            _html.Div(className="collapsible-card__body", children=body_children),
+        ],
+    )
+
+
 def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id):
     athlete_count = len(team_summary or [])
     coach_snapshot = _coach_daily_snapshot(team_summary)
@@ -760,7 +785,7 @@ def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id
                 ]),
             ]),
         ]),
-    ], className="page-content profile-shell")
+    ], className="page-content profile-shell coach-shell")
 
 
 def layout():

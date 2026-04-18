@@ -349,7 +349,7 @@ def _layout_coach_checkin(coach_id: int):
         group_qs = [_make_slider(q) for q in defs if q.get("group") == gk]
         question_items.append(_group_block(gk, group_qs, visible=True, open_default=(gk != "sesion")))
 
-    return html.Div([
+    return html.Div(className="coach-shell", children=[
         html.Div(className="page-head", children=[
             html.H2("Check-in del equipo"),
             html.P(
@@ -1009,7 +1009,9 @@ def layout_history():
         hist_title = "Histórico de wellbeing"
         hist_sub = "Aquí puedes ver cómo ha ido cambiando el estado del día y qué señales merece la pena revisar con más calma."
 
-    return html.Div([
+    shell_cls = "coach-shell" if role == "coach" else ""
+
+    return html.Div(className=shell_cls, children=[
 
         # ── Encabezado ──────────────────────────────────────────────────────
         html.Div(className="page-head", children=[
