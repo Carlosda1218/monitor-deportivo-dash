@@ -211,10 +211,6 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
 .graph-fixed{ height:420px !important; }
 /* Animación suave del sidebar, contenido y botón flotante */
 #sidebar, #page-content, #btn-toggle-sidebar { transition: all .25s ease; }
-#sidebar, #page-content, #btn-toggle-sidebar { transition: all .25s ease; }
-/* Animación suave del sidebar, contenido y botón flotante */
-#sidebar, #page-content, #btn-toggle-sidebar { transition: all .25s ease; }
-#sidebar, #page-content, #btn-toggle-sidebar { transition: all .25s ease; }
 
 /* ===============================
    Fase B — Menos aire lateral (Desktop) • sin responsive
