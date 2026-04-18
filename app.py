@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 
 from flask import Flask, session, request
 import dash
-from dash import Dash, html, dcc, Input, Output, State, callback_context
+from dash import Dash, html, dcc, Input, Output, State, callback_context, ALL
 from dash.dash_table import DataTable
 from dash.exceptions import PreventUpdate
 
@@ -33,6 +33,7 @@ import ui_charts as _uc
 from views.signals_view import SignalsView
 from views.sensors_view import SensorsView
 from views.compare_view import CompareView
+from views.analysis_view import AnalysisView
 
 # ====== Flask + Dash ======
 server = Flask(__name__)
@@ -49,9 +50,10 @@ app = dash.Dash(
 db.init_db()
 
 # ====== Instancias de vistas nuevas ======
-signals_view = SignalsView(app, db, S)
-sensors_view = SensorsView(app, db, S)
-compare_view = CompareView(app, db, S)
+signals_view  = SignalsView(app, db, S)
+sensors_view  = SensorsView(app, db, S)
+compare_view  = CompareView(app, db, S)
+analysis_view = AnalysisView(app, db, S)
 
 # ====== Layout (CS-003 — Sidebar Pro • Desktop) ======
 SIDEBAR_W = 272  # px (match assets/10_theme.css)
@@ -93,26 +95,36 @@ def _profile_label(value, fallback="Sin definir"):
 
 def _coach_roster(coach_id: int):
     """
-    Roster unificado del coach.
-    - Incluye adopciones (si tu db.py ya soporta roster).
-    - Incluye legacy (users.coach_id) para no romper lo previo.
+    Roster unificado del coach, filtrado por el deporte del coach.
+    Un coach de Taekwondo solo ve atletas de Taekwondo; ídem para Boxeo.
     """
     if not coach_id:
         return []
 
+    # Deporte del coach desde sesión (disponible en contexto de request)
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or None
+
     out = []
     seen = set()
 
-    # Prioriza roster/adopción si existe
     for fn in ("list_roster_for_coach", "list_my_athletes", "list_athletes_for_coach"):
         if hasattr(db, fn):
             try:
-                rows = getattr(db, fn)(int(coach_id)) or []
+                # Pasa sport si la función lo acepta (list_athletes_for_coach ya lo hace)
+                import inspect
+                sig = inspect.signature(getattr(db, fn))
+                if "sport" in sig.parameters:
+                    rows = getattr(db, fn)(int(coach_id), sport=coach_sport) or []
+                else:
+                    rows = getattr(db, fn)(int(coach_id)) or []
                 for r in rows:
                     if not isinstance(r, dict):
                         continue
                     rid = r.get("id")
                     if rid is None or rid in seen:
+                        continue
+                    # Filtro de deporte por si la función no lo aplica en DB
+                    if coach_sport and r.get("sport") and r["sport"] != coach_sport:
                         continue
                     seen.add(rid)
                     out.append(r)
@@ -217,6 +229,7 @@ def _sidebar_links(pathname: str):
                 _nav_section(
                     "Análisis",
                     [
+                        _nav_link("Análisis profesional", "/analisis", "signals.svg", pathname),
                         _nav_link("Análisis de sesión", "/ecg", "signals.svg", pathname),
                         _nav_link("Histórico y comparación", "/comparar", "compare.svg", pathname),
                     ],
@@ -258,31 +271,32 @@ def _sidebar_links(pathname: str):
                 _nav_section(
                     "Inicio",
                     [
-                        _nav_link("Panel", "/", "session.svg", pathname),
-                        _nav_link("Sesión", "/sesion", "session.svg", pathname),
-                        _nav_link("Perfil", "/dashboard", "profile.svg", pathname),
+                        _nav_link("Panel de equipo", "/", "session.svg", pathname),
+                        _nav_link("Mi jornada", "/sesion", "session.svg", pathname),
+                        _nav_link("Mi perfil", "/dashboard", "profile.svg", pathname),
                     ],
                 ),
                 _nav_section(
-                    "Sesiones",
+                    "Mi equipo",
                     [
-                        _nav_link("Equipo", "/usuarios", "team.svg", pathname),
-                        _nav_link("Perfil de atleta", "/deportista", "profile.svg", pathname),
-                        _nav_link("Sensores", "/sensores", "sensors.svg", pathname),
+                        _nav_link("Estado del equipo", "/usuarios", "team.svg", pathname),
+                        _nav_link("Ficha de atleta", "/deportista", "profile.svg", pathname),
+                        _nav_link("Sensores del equipo", "/sensores", "sensors.svg", pathname),
                     ],
                 ),
                 _nav_section(
-                    "Análisis",
+                    "Rendimiento",
                     [
-                        _nav_link("Análisis de sesión", "/ecg", "signals.svg", pathname),
-                        _nav_link("Histórico y comparación", "/comparar", "compare.svg", pathname),
+                        _nav_link("Análisis profesional", "/analisis", "signals.svg", pathname),
+                        _nav_link("Análisis de señales", "/ecg", "signals.svg", pathname),
+                        _nav_link("Comparativa", "/comparar", "compare.svg", pathname),
                     ],
                 ),
                 _nav_section(
-                    "Wellbeing",
+                    "Bienestar",
                     [
-                        _nav_link("Wellbeing del equipo", "/cuestionario", "wellbeing.svg", pathname),
-                        _nav_link("Histórico de wellbeing", "/historico", "history.svg", pathname),
+                        _nav_link("Check-in del equipo", "/cuestionario", "wellbeing.svg", pathname),
+                        _nav_link("Historial", "/historico", "history.svg", pathname),
                     ],
                 ),
                 _nav_section(
@@ -466,6 +480,82 @@ page_logout, err_logout = _safe_import("pages.logout")
 #        VISTAS
 # =========================
 
+# ---- ESTADO DEL EQUIPO (coach) ----
+def _coach_team_status_layout_v2(coach_sport, roster_count, team_count, roster_tab, teams_tab):
+    return html.Div([
+        html.Div(className="profile-hero-grid", children=[
+            html.Div(className="page-head profile-hero", children=[
+                html.Div(className="session-pill-row", children=[
+                    html.Span(coach_sport or "Deporte de combate", className="session-pill"),
+                    html.Span("Coach", className="session-pill session-pill--muted"),
+                ]),
+                html.H2("Estado del equipo"),
+                html.P(
+                    "Aquí preparas tu plantilla y tus equipos antes de pasar al seguimiento individual.",
+                    className="text-muted",
+                ),
+            ]),
+            html.Div(className="card profile-focus-card", children=[
+                html.H4("Lo más útil aquí", className="card-title"),
+                html.P(
+                    "Primero reúne a tus deportistas en plantilla y después arma los grupos con los que vas a trabajar.",
+                    className="text-muted",
+                ),
+                html.Ul([
+                    html.Li([html.Strong("Plantilla actual: "), f"{roster_count} atleta{'s' if roster_count != 1 else ''}"]),
+                    html.Li([html.Strong("Equipos activos: "), str(team_count)]),
+                    html.Li([html.Strong("Primero: "), "revisa o amplía tu plantilla."]),
+                    html.Li([html.Strong("Después: "), "crea equipos y asigna miembros según cómo quieras trabajar."]),
+                ], className="list-compact"),
+            ]),
+        ]),
+        html.Div(className="kpis profile-kpis", children=[
+            html.Div(className="kpi", children=[
+                html.Div("Atletas en plantilla", className="kpi-label"),
+                html.Div(str(roster_count), className="kpi-value"),
+                html.Div("Base actual de deportistas bajo tu seguimiento", className="kpi-sub"),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+            html.Div(className="kpi", children=[
+                html.Div("Equipos activos", className="kpi-label"),
+                html.Div(str(team_count), className="kpi-value"),
+                html.Div("Grupos que ya puedes usar para organizar trabajo", className="kpi-sub"),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+            html.Div(className="kpi", children=[
+                html.Div("Vista actual", className="kpi-label"),
+                html.Div("Organización", className="kpi-value", style={"fontSize": "22px"}),
+                html.Div("Plantilla y equipos listos para trabajar con más orden", className="kpi-sub"),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+        ]),
+        html.Div(className="card", children=[
+            html.H4("Paso recomendado", className="card-title"),
+            html.P(
+                "Si todavía no tienes un grupo creado, empieza por ahí. Si ya lo tienes, pasa a gestionar sus miembros.",
+                className="text-muted",
+            ),
+            html.Ul([
+                html.Li("Mis deportistas: buscar, añadir y limpiar la plantilla."),
+                html.Li("Equipos: crear grupos y asignar miembros según el contexto de trabajo."),
+            ], className="list-compact"),
+        ]),
+        dcc.Tabs(
+            id="tabs-coach-users",
+            value="tab-roster",
+            className="combatiq-tabs",
+            children=[
+                dcc.Tab(label="Mis deportistas", value="tab-roster",
+                        className="combatiq-tab", selected_className="combatiq-tab--active",
+                        children=[roster_tab]),
+                dcc.Tab(label="Equipos", value="tab-teams",
+                        className="combatiq-tab", selected_className="combatiq-tab--active",
+                        children=[teams_tab]),
+            ]
+        ),
+    ], className="page-content profile-shell")
+
+
 # ---- USUARIOS ----
 def view_usuarios():
     if not session.get("user_id"):
@@ -474,11 +564,15 @@ def view_usuarios():
     role = _to_str(session.get("role")) or "no autenticado"
     user_id = session.get("user_id")
 
-    sports_base = ["Taekwondo", "Judo", "Kickboxing", "Box", "Muay Thai", "MMA", "Karate", "Sambo"]
-    sports_opts = [{"label": s, "value": s} for s in sports_base] + [
-        {"label": "Otra (especificar)", "value": "OTRA"}
-    ]
-    sports_opts_search = [{"label": "Cualquiera", "value": ""}] + sports_opts
+    sports_base = ["Taekwondo", "Box"]
+    sports_opts = [{"label": s, "value": s} for s in sports_base]
+
+    # Coach solo busca en su propio deporte — no tiene sentido buscar fuera
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or None
+    if role == "coach" and coach_sport:
+        sports_opts_search = [{"label": coach_sport, "value": coach_sport}]
+    else:
+        sports_opts_search = [{"label": "Cualquiera", "value": ""}] + sports_opts
 
     # =========================
     # COACH: roster + equipos
@@ -492,174 +586,196 @@ def view_usuarios():
         teams = db.list_teams(coach_id) if hasattr(db, "list_teams") else []
         team_opts = [{"label": f"{t['name']}{(' — '+t['sport']) if t.get('sport') else ''}", "value": t["id"]} for t in (teams or [])]
 
-        tbl_search = DataTable(
-            id="tbl-search-athletes",
-            data=[],
-            columns=[
-                {"name": "ID", "id": "id"},
-                {"name": "Nombre", "id": "name"},
-                {"name": "Deporte", "id": "sport"},
-                {"name": "Alta", "id": "created_at"},
-            ],
-            page_size=6,
-            row_selectable="single",
-            style_table={"overflowX": "auto"},
-            sort_action="native",
-            filter_action="native",
-        )
+        _roster_display = [{**a, "created_at": (a.get("created_at") or "")[:10]} for a in roster]
 
-        tbl_roster = DataTable(
-            id="tbl-roster",
-            data=roster,
-            columns=[
-                {"name": "ID", "id": "id"},
-                {"name": "Nombre", "id": "name"},
-                {"name": "Deporte", "id": "sport"},
-                {"name": "Alta", "id": "created_at"},
-            ],
-            page_size=8,
-            row_selectable="single",
-            style_table={"overflowX": "auto"},
-            sort_action="native",
-            filter_action="native",
-        )
+        def team_fold(title, hint, body_children, open_by_default=False):
+            return html.Details(
+                className="card collapsible-card team-collapsible-card",
+                open=open_by_default,
+                children=[
+                    html.Summary(
+                        className="collapsible-card__summary",
+                        children=[
+                            html.Div(
+                                className="collapsible-card__head",
+                                children=[
+                                    html.H4(title, className="card-title"),
+                                    html.P(hint, className="text-muted"),
+                                ],
+                            ),
+                            html.Span(">", className="collapsible-card__chevron"),
+                        ],
+                    ),
+                    html.Div(className="collapsible-card__body", children=body_children),
+                ],
+            )
 
-        tbl_team_members = DataTable(
-            id="tbl-team-members",
-            data=[],
-            columns=[
-                {"name": "ID", "id": "athlete_id"},
-                {"name": "Nombre", "id": "name"},
-                {"name": "Deporte", "id": "sport"},
-                {"name": "Rol", "id": "role_label"},
-                {"name": "Añadido", "id": "added_at"},
-            ],
-            page_size=8,
-            row_selectable="single",
-            style_table={"overflowX": "auto"},
-            sort_action="native",
-            filter_action="native",
-        )
-
-        roster_tab = html.Div([
-
-            html.Div(className="card", style={"marginBottom": "16px"}, children=[
-                html.H4("Buscar deportista", className="card-title"),
-                html.Div(className="filters-bar filters-bar--3", style={"marginBottom": "12px"}, children=[
-                    html.Div(className="filter-item", children=[
-                        html.Label("Nombre"),
-                        dcc.Input(id="coach-search-text", type="text", placeholder="Buscar por nombre...", style={"width": "100%"}),
-                    ]),
-                    html.Div(className="filter-item", children=[
-                        html.Label("Deporte"),
-                        dcc.Dropdown(id="coach-search-sport", options=sports_opts_search, value="", placeholder="Cualquiera"),
-                    ]),
-                    html.Div(className="filter-item", children=[
-                        html.Div(id="coach-sport-custom-box", style={"display": "none"}, children=[
-                            html.Label("Deporte exacto"),
-                            dcc.Input(id="coach-search-sport-custom", type="text", placeholder="Especifica deporte exacto", style={"width": "100%"}),
+        roster_tab = html.Div(className="coach-stack", children=[
+            team_fold(
+                "Buscar deportista",
+                "Busca por nombre y añade deportistas a tu plantilla.",
+                [
+                    html.Div(className="filters-bar filters-bar--3", children=[
+                        html.Div(className="filter-item", children=[
+                            html.Label("Nombre"),
+                            dcc.Input(id="coach-search-text", type="text", placeholder="Buscar por nombre...", className="filter-input"),
                         ]),
-                        html.Button("Buscar", id="btn-coach-search", n_clicks=0,
-                                    className="btn btn-primary", style={"width": "100%", "marginTop": "18px"}),
-                    ]),
-                ]),
-                html.Div(id="coach-search-msg", className="text-muted", style={"marginBottom": "8px"}),
-                html.Div(className="dt-pro", children=[tbl_search]),
-                html.Div(style={"marginTop": "10px"}, children=[
-                    html.Button("Agregar al roster", id="btn-roster-add", n_clicks=0, className="btn btn-primary"),
-                ]),
-            ]),
-
-            html.Div(className="card", children=[
-                html.H4("Mi roster actual", className="card-title"),
-                html.P("Los deportistas de este roster son los que aparecen en cuestionario, histórico y comunicados.", className="text-muted", style={"marginBottom": "12px"}),
-                html.Div(className="dt-pro", children=[tbl_roster]),
-                html.Div(style={"marginTop": "10px", "display": "flex", "gap": "10px", "alignItems": "center"}, children=[
-                    html.Button("Quitar del roster", id="btn-roster-remove", n_clicks=0, className="btn btn-danger"),
-                    html.Div(id="coach-roster-msg", className="text-danger"),
-                ]),
-            ]),
-        ])
-
-        teams_tab = html.Div([
-
-            html.Div(className="card", style={"marginBottom": "16px"}, children=[
-                html.H4("Crear equipo", className="card-title"),
-                html.Div(className="filters-bar filters-bar--3", style={"marginBottom": "10px"}, children=[
-                    html.Div(className="filter-item", children=[
-                        html.Label("Nombre del equipo"),
-                        dcc.Input(id="team-name", type="text", placeholder="Ej. Élite senior", style={"width": "100%"}),
-                    ]),
-                    html.Div(className="filter-item", children=[
-                        html.Label("Deporte (opcional)"),
-                        dcc.Dropdown(id="team-sport", options=sports_opts_search, value="", placeholder="Cualquiera"),
-                    ]),
-                    html.Div(className="filter-item", children=[
-                        html.Div(id="team-sport-custom-box", style={"display": "none"}, children=[
-                            html.Label("Deporte exacto"),
-                            dcc.Input(id="team-sport-custom", type="text", placeholder="Especifica deporte exacto", style={"width": "100%"}),
-                        ]),
-                        html.Button("Crear equipo", id="btn-team-create", n_clicks=0,
-                                    className="btn btn-primary", style={"width": "100%", "marginTop": "18px"}),
-                    ]),
-                ]),
-                html.Div(id="team-create-msg", className="text-danger"),
-            ]),
-
-            html.Div(className="card", children=[
-                html.H4("Gestionar miembros", className="card-title"),
-                html.P("Selecciona un equipo y añade o quita deportistas de tu roster.", className="text-muted", style={"marginBottom": "14px"}),
-                html.Div(
-                    style={"display": "grid", "gridTemplateColumns": "300px 1fr", "gap": "16px", "alignItems": "start"},
-                    children=[
-                        html.Div([
-                            html.Div(className="filter-item", style={"marginBottom": "10px"}, children=[
-                                html.Label("Equipo"),
-                                dcc.Dropdown(id="team-select", options=team_opts, placeholder="Selecciona un equipo"),
-                            ]),
-                            html.Div(className="filter-item", style={"marginBottom": "14px"}, children=[
-                                html.Label("Deportista del roster"),
-                                dcc.Dropdown(id="team-add-athlete", options=roster_opts, placeholder="Selecciona deportista"),
-                            ]),
-                            html.Div(style={"display": "flex", "gap": "10px"}, children=[
-                                html.Button("Agregar", id="btn-team-add-member", n_clicks=0, className="btn btn-primary"),
-                                html.Button("Quitar", id="btn-team-remove-member", n_clicks=0, className="btn btn-ghost"),
-                            ]),
-                            html.Div(id="team-msg", className="text-danger", style={"marginTop": "8px"}),
-                            html.P(
-                                "Añade primero al deportista al roster antes de asignarlo a un equipo.",
-                                className="text-muted", style={"marginTop": "10px"},
+                        html.Div(className="filter-item", children=[
+                            html.Label("Deporte"),
+                            dcc.Dropdown(
+                                id="coach-search-sport",
+                                options=sports_opts_search,
+                                value=coach_sport or "",
+                                disabled=bool(coach_sport),
+                                placeholder=coach_sport or "Cualquiera",
                             ),
                         ]),
-                        html.Div([
-                            html.H4("Miembros del equipo", className="card-title"),
-                            html.Div(className="dt-pro", children=[tbl_team_members]),
+                        html.Div(className="filter-item", children=[
+                            html.Button("Buscar", id="btn-coach-search", n_clicks=0,
+                                        className="btn btn-primary btn-full-mt"),
                         ]),
-                    ],
-                ),
-            ]),
-        ])
-
-        return html.Div([
-            html.Div(className="page-head", children=[
-                html.H2("Mi equipo"),
-                html.P("Gestiona tu roster y organiza deportistas en equipos de trabajo.", className="text-muted"),
-            ]),
-            html.Div(className="ecg-divider"),
-            dcc.Tabs(
-                id="tabs-coach-users",
-                value="tab-roster",
-                className="combatiq-tabs",
-                children=[
-                    dcc.Tab(label="Mis deportistas", value="tab-roster",
-                            className="combatiq-tab", selected_className="combatiq-tab--active",
-                            children=[roster_tab]),
-                    dcc.Tab(label="Equipos", value="tab-teams",
-                            className="combatiq-tab", selected_className="combatiq-tab--active",
-                            children=[teams_tab]),
-                ]
+                    ]),
+                    html.Div(id="coach-search-msg", className="text-muted form-msg--below"),
+                    dcc.Store(id="search-results-store", data=[]),
+                    html.Div(id="search-results-container"),
+                ],
+                open_by_default=False,
+            ),
+            team_fold(
+                "Mi plantilla",
+                f"Aquí ves y mantienes a tus {len(_roster_display)} deportistas actuales.",
+                [
+                    html.Div(id="plantilla-list", children=_render_plantilla(_roster_display)),
+                    html.Div(className="btn-save-row", children=[
+                        dcc.Dropdown(
+                            id="plantilla-remove-dropdown",
+                            options=roster_opts,
+                            placeholder="Selecciona deportista a retirar...",
+                            clearable=True,
+                        ),
+                        html.Button("Retirar de la plantilla", id="btn-roster-remove", n_clicks=0, className="btn btn-ghost"),
+                        html.Div(id="coach-roster-msg", className="text-danger"),
+                    ]),
+                ],
+                open_by_default=True,
             ),
         ])
+
+        roster_tab = html.Div(className="coach-stack", children=[
+            team_fold(
+                "Buscar deportista",
+                "Busca por nombre y añade deportistas a tu plantilla.",
+                [
+                    html.Div(className="filters-bar filters-bar--3", children=[
+                        html.Div(className="filter-item", children=[
+                            html.Label("Nombre"),
+                            dcc.Input(id="coach-search-text", type="text", placeholder="Buscar por nombre...", className="filter-input"),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Label("Deporte"),
+                            dcc.Dropdown(
+                                id="coach-search-sport",
+                                options=sports_opts_search,
+                                value=coach_sport or "",
+                                disabled=bool(coach_sport),
+                                placeholder=coach_sport or "Cualquiera",
+                            ),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Button("Buscar", id="btn-coach-search", n_clicks=0,
+                                        className="btn btn-primary btn-full-mt"),
+                        ]),
+                    ]),
+                    html.Div(id="coach-search-msg", className="text-muted form-msg--below"),
+                    dcc.Store(id="search-results-store", data=[]),
+                    html.Div(id="search-results-container"),
+                ],
+                open_by_default=False,
+            ),
+            team_fold(
+                "Mi plantilla",
+                f"Aquí ves a quién tienes en seguimiento y puedes retirarlo si hace falta.",
+                [
+                    html.Div(id="plantilla-list", children=_render_plantilla(_roster_display)),
+                    html.Div(className="btn-save-row", children=[
+                        dcc.Dropdown(
+                            id="plantilla-remove-dropdown",
+                            options=roster_opts,
+                            placeholder="Selecciona deportista a retirar...",
+                            clearable=True,
+                        ),
+                        html.Button("Retirar de la plantilla", id="btn-roster-remove", n_clicks=0, className="btn btn-ghost"),
+                        html.Div(id="coach-roster-msg", className="text-danger"),
+                    ]),
+                ],
+                open_by_default=True,
+            ),
+        ])
+
+        teams_tab = html.Div(className="coach-stack", children=[
+            team_fold(
+                "Crear equipo",
+                "Ponle nombre al grupo y créalo antes de asignar deportistas.",
+                [
+                    html.Div(className="filters-bar filters-bar--3", children=[
+                        html.Div(className="filter-item", children=[
+                            html.Label("Nombre del equipo"),
+                            dcc.Input(id="team-name", type="text", placeholder="Ej. Élite senior", className="filter-input"),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Label("Deporte (opcional)"),
+                            dcc.Dropdown(id="team-sport", options=sports_opts_search, value="", placeholder="Cualquiera"),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Button("Crear equipo", id="btn-team-create", n_clicks=0,
+                                        className="btn btn-primary btn-full-mt"),
+                        ]),
+                    ]),
+                    html.Div(id="team-create-msg", className="text-danger form-msg"),
+                ],
+                open_by_default=False,
+            ),
+            team_fold(
+                "Gestionar miembros",
+                "Selecciona un equipo y añade o retira deportistas según cómo quieras trabajar.",
+                [
+                    html.Div(className="filters-bar filters-bar--3", children=[
+                        html.Div(className="filter-item", children=[
+                            html.Label("Equipo"),
+                            dcc.Dropdown(id="team-select", options=team_opts, placeholder="Selecciona un equipo"),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Label("Atleta de la plantilla"),
+                            dcc.Dropdown(id="team-add-athlete", options=roster_opts, placeholder="Selecciona deportista"),
+                        ]),
+                        html.Div(className="filter-item", children=[
+                            html.Button("Agregar al equipo", id="btn-team-add-member", n_clicks=0,
+                                        className="btn btn-primary btn-full-mt"),
+                        ]),
+                    ]),
+                    html.Div(id="team-msg", className="text-muted form-msg--below"),
+                    dcc.Store(id="team-members-store", data=[]),
+                    html.H4("Miembros del equipo", className="card-title", style={"marginTop": "18px"}),
+                    html.Div(id="team-members-container"),
+                    html.P(
+                        "Añade primero al deportista a la plantilla antes de asignarlo a un equipo.",
+                        className="text-muted", style={"marginTop": "10px"},
+                    ),
+                ],
+                open_by_default=True,
+            ),
+        ])
+
+        _roster_count = len(roster)
+        _team_count   = len(teams) if teams else 0
+
+        return _coach_team_status_layout_v2(
+            coach_sport=coach_sport,
+            roster_count=_roster_count,
+            team_count=_team_count,
+            roster_tab=roster_tab,
+            teams_tab=teams_tab,
+        )
 
     # =========================
     # DEPORTISTA: ver su coach
@@ -701,15 +817,13 @@ def view_usuarios():
         if not coach:
             coach_card = html.Div(
                 className="card",
-                style={"marginBottom": "16px"},
                 children=[
                     html.H4("Tu coach", className="card-title"),
                     html.Div(
-                        className="inner-card",
-                        style={"padding": "24px", "textAlign": "center"},
+                        className="inner-card data-empty-state",
                         children=[
-                            html.P("Aún no tienes un coach asignado.", style={"fontWeight": "600", "marginBottom": "6px"}),
-                            html.P("Pide a tu coach que te añada a su roster desde su panel.", className="text-muted"),
+                            html.P("Aún no tienes un coach asignado.", className="empty-state-title"),
+                            html.P("Pide a tu coach que te añada a su plantilla desde su panel.", className="text-muted"),
                         ],
                     ),
                 ],
@@ -720,31 +834,30 @@ def view_usuarios():
             coach_since = (coach.get("created_at") or "")[:10] or "—"
             coach_card = html.Div(
                 className="card",
-                style={"marginBottom": "16px"},
                 children=[
                     html.H4("Tu coach", className="card-title"),
-                    html.Div(className="filters-bar filters-bar--3", style={"marginBottom": "16px"}, children=[
-                        html.Div(className="inner-cell", style={"padding": "14px 16px"}, children=[
+                    html.Div(className="filters-bar filters-bar--3", children=[
+                        html.Div(className="inner-cell", children=[
                             html.Div("Nombre", className="kpi-label"),
                             html.Div(coach_name, className="kpi-value"),
                         ]),
-                        html.Div(className="inner-cell", style={"padding": "14px 16px"}, children=[
+                        html.Div(className="inner-cell", children=[
                             html.Div("Deporte", className="kpi-label"),
                             html.Div(coach_sport, className="kpi-value"),
                         ]),
-                        html.Div(className="inner-cell", style={"padding": "14px 16px"}, children=[
+                        html.Div(className="inner-cell", children=[
                             html.Div("En la plataforma desde", className="kpi-label"),
                             html.Div(coach_since, className="kpi-value"),
                         ]),
                     ]),
-                    html.Div(className="filters-bar", style={"gap": "10px"}, children=[
+                    html.Div(className="btn-save-row", children=[
                         dcc.Link(
                             html.Button("Contactar con el coach", className="btn btn-primary"),
-                            href="/contacto", style={"display": "inline-block"},
+                            href="/contacto", className="link-btn",
                         ),
                         dcc.Link(
                             html.Button("Actualizar mi check-in", className="btn btn-ghost"),
-                            href="/cuestionario", style={"display": "inline-block"},
+                            href="/cuestionario", className="link-btn",
                         ),
                     ]),
                 ],
@@ -759,7 +872,7 @@ def view_usuarios():
                 _mate_count = len(_mates)
                 if _mates:
                     chips = html.Div(
-                        style={"display": "flex", "flexWrap": "wrap", "gap": "8px", "marginTop": "14px"},
+                        className="teammate-chips",
                         children=[
                             html.Div(className="teammate-chip", children=[
                                 html.Span(_initials(m["name"]), className="teammate-chip__avatar"),
@@ -768,35 +881,31 @@ def view_usuarios():
                         ],
                     )
                 else:
-                    chips = html.P("Aún no hay otros miembros en este equipo.", className="text-muted", style={"marginTop": "10px"})
+                    chips = html.P("Aún no hay otros miembros en este equipo.", className="text-muted")
 
                 team_cards.append(html.Div(
                     className="card",
-                    style={"marginBottom": "16px"},
                     children=[
-                        html.Div(style={"display": "flex", "justifyContent": "space-between", "alignItems": "baseline"}, children=[
+                        html.Div(className="card-header-row", children=[
                             html.H4(_team.get("name") or "Mi equipo", className="card-title"),
                             html.Span(
                                 f"{_mate_count} compañero{'s' if _mate_count != 1 else ''}",
-                                className="text-muted",
-                                style={"fontSize": "12px"},
+                                className="count-badge",
                             ),
                         ]),
                         chips,
                     ],
                 ))
-            team_block = html.Div(team_cards)
+            team_block = html.Div(className="coach-stack", children=team_cards)
         else:
             team_block = html.Div(
                 className="card",
-                style={"marginBottom": "16px"},
                 children=[
                     html.H4("Mi equipo", className="card-title"),
                     html.Div(
-                        className="inner-card",
-                        style={"padding": "22px", "textAlign": "center"},
+                        className="inner-card data-empty-state",
                         children=[
-                            html.P("Aún no formas parte de ningún equipo.", style={"fontWeight": "600", "marginBottom": "6px"}),
+                            html.P("Aún no formas parte de ningún equipo.", className="empty-state-title"),
                             html.P("Tu coach puede añadirte a un equipo desde su panel.", className="text-muted"),
                         ],
                     ),
@@ -808,18 +917,20 @@ def view_usuarios():
                 html.H2("Mi coach y equipo"),
                 html.P("Tu tribu · Comparte el camino.", className="text-muted"),
             ]),
-            html.Div(className="ecg-divider"),
-            coach_card,
-            team_block,
-            html.Div(className="quote-card", children=[
-                f'"{_quote_text}"',
-                html.Span(f"— {_quote_src}", className="quote-card__source"),
-            ]),
-            html.Div(className="filters-bar", style={"gap": "10px"}, children=[
-                dcc.Link(html.Button("Ver mis sesiones", className="btn btn-ghost"),
-                         href="/sesion", style={"display": "inline-block"}),
-                dcc.Link(html.Button("Ir a análisis", className="btn btn-ghost"),
-                         href="/ecg", style={"display": "inline-block"}),
+            html.Div(className="ecg-divider ecg-divider--spaced"),
+            html.Div(className="coach-stack", children=[
+                coach_card,
+                team_block,
+                html.Div(className="quote-card", children=[
+                    f'"{_quote_text}"',
+                    html.Span(f"— {_quote_src}", className="quote-card__source"),
+                ]),
+                html.Div(className="btn-save-row", children=[
+                    dcc.Link(html.Button("Ver mis sesiones", className="btn btn-ghost"),
+                             href="/sesion", className="link-btn"),
+                    dcc.Link(html.Button("Ir a análisis", className="btn btn-ghost"),
+                             href="/ecg", className="link-btn"),
+                ]),
             ]),
         ])
 
@@ -845,19 +956,14 @@ def view_usuarios():
     add_controls = html.Div(className="filters-bar filters-bar--3", children=[
         html.Div(className="filter-item", children=[
             html.Label("Nombre completo"),
-            dcc.Input(id="in-name", type="text", placeholder="Nombre completo", style={"width": "100%"}),
+            dcc.Input(id="in-name", type="text", placeholder="Nombre completo", className="filter-input"),
         ]),
         html.Div(className="filter-item", children=[
             html.Label("Deporte"),
             dcc.Dropdown(id="in-sport", options=sports_opts, placeholder="Deporte"),
         ]),
         html.Div(className="filter-item", children=[
-            html.Div(id="sport-custom-box", style={"display": "none"}, children=[
-                html.Label("Deporte exacto"),
-                dcc.Input(id="in-sport-custom", type="text", placeholder="Especifica deporte/arte marcial", style={"width": "100%"}),
-            ]),
-            html.Button("Añadir usuario", id="btn-add", n_clicks=0, className="btn btn-primary",
-                        style={"marginTop": "18px", "width": "100%"}),
+            html.Button("Añadir usuario", id="btn-add", n_clicks=0, className="btn btn-primary btn-full-mt"),
         ]),
     ])
 
@@ -871,8 +977,7 @@ def view_usuarios():
             ),
         ]),
         html.Div(className="filter-item", children=[
-            html.Button("Eliminar", id="btn-del", n_clicks=0, className="btn btn-danger",
-                        style={"marginTop": "18px", "width": "100%"}),
+            html.Button("Eliminar", id="btn-del", n_clicks=0, className="btn btn-danger btn-full-mt"),
         ]),
     ])
 
@@ -880,32 +985,27 @@ def view_usuarios():
         html.Div(className="page-head", children=[
             html.H2("Gestión de usuarios"),
             html.P(
-                "Da de alta o elimina usuarios. Los coaches gestionan roster y equipos desde su propia sección.",
+                "Da de alta o elimina usuarios. Los coaches gestionan su plantilla y equipos desde su propia sección.",
                 className="text-muted",
             ),
         ]),
-        html.Div(className="ecg-divider", style={"marginBottom": "20px"}),
-
-        html.Div(className="card", style={"marginBottom": "16px"}, children=[
-            html.H4("Añadir usuario", className="card-title"),
-            html.Div(add_controls),
-        ]),
-
-        html.Div(className="card", style={"marginBottom": "16px"}, children=[
-            html.H4("Eliminar usuario", className="card-title"),
-            html.Div(delete_controls),
-        ]),
-
-        html.Div(className="card", children=[
-            html.H4("Todos los usuarios", className="card-title"),
-            html.Div(className="dt-pro", children=[table]),
-            html.Div(id="users-msg", className="text-danger", style={"marginTop": "8px"}),
+        html.Div(className="ecg-divider ecg-divider--spaced"),
+        html.Div(className="coach-stack", children=[
+            html.Div(className="card", children=[
+                html.H4("Añadir usuario", className="card-title"),
+                html.Div(add_controls),
+            ]),
+            html.Div(className="card", children=[
+                html.H4("Eliminar usuario", className="card-title"),
+                html.Div(delete_controls),
+            ]),
+            html.Div(className="card", children=[
+                html.H4("Todos los usuarios", className="card-title"),
+                html.Div(className="dt-pro", children=[table]),
+                html.Div(id="users-msg", className="text-danger form-msg"),
+            ]),
         ]),
     ])
-
-@app.callback(Output("sport-custom-box", "style"), Input("in-sport", "value"))
-def toggle_custom_sport(selected):
-    return {} if selected == "OTRA" else {"display": "none"}
 
 
 @app.callback(
@@ -916,11 +1016,10 @@ def toggle_custom_sport(selected):
     Input("btn-del", "n_clicks"),
     State("in-name", "value"),
     State("in-sport", "value"),
-    State("in-sport-custom", "value"),
     State("in-del-user", "value"),
     prevent_initial_call=True
 )
-def user_actions(n_add, n_del, name, sport, sport_custom, del_user_id):
+def user_actions(n_add, n_del, name, sport, del_user_id):
     role = _to_str(session.get("role")) or "no autenticado"
 
     # A partir de ahora, SOLO admin puede crear/eliminar usuarios (evitamos "usuarios rápidos" del coach).
@@ -936,15 +1035,8 @@ def user_actions(n_add, n_del, name, sport, sport_custom, del_user_id):
         if not name:
             msg = "Nombre requerido."
         else:
-            if sport == "OTRA":
-                if not (sport_custom and sport_custom.strip()):
-                    msg = "Especifica el deporte en el campo 'Otro'."
-                else:
-                    db.add_user(name, sport_custom.strip(), role="deportista", coach_id=None)
-                    msg = "Usuario añadido."
-            else:
-                db.add_user(name, sport, role="deportista", coach_id=None)
-                msg = "Usuario añadido."
+            db.add_user(name, sport, role="deportista", coach_id=None)
+            msg = "Usuario añadido."
 
     elif "btn-del" in trig:
         if not del_user_id:
@@ -960,15 +1052,6 @@ def user_actions(n_add, n_del, name, sport, sport_custom, del_user_id):
 # =========================
 # COACH: Roster + Equipos
 # =========================
-
-@app.callback(Output("coach-sport-custom-box", "style"), Input("coach-search-sport", "value"))
-def toggle_custom_sport_coach(selected):
-    return {} if selected == "OTRA" else {"display": "none"}
-
-
-@app.callback(Output("team-sport-custom-box", "style"), Input("team-sport", "value"))
-def toggle_custom_sport_team(selected):
-    return {} if selected == "OTRA" else {"display": "none"}
 
 
 def _fallback_search_athletes(text: str = "", sport: str = None, limit: int = 50):
@@ -998,26 +1081,27 @@ def _fallback_search_athletes(text: str = "", sport: str = None, limit: int = 50
 
 
 @app.callback(
-    Output("tbl-search-athletes", "data"),
+    Output("search-results-container", "children"),
+    Output("search-results-store", "data"),
     Output("coach-search-msg", "children"),
     Input("btn-coach-search", "n_clicks"),
     State("coach-search-text", "value"),
     State("coach-search-sport", "value"),
-    State("coach-search-sport-custom", "value"),
     prevent_initial_call=True
 )
-def coach_search_athletes(n, text, sport, sport_custom):
+def coach_search_athletes(n, text, sport):
     if _to_str(session.get("role")) != "coach":
-        return [], "Inicia sesión como coach."
+        return None, [], "Inicia sesión como coach."
     if not n:
         raise PreventUpdate
 
     text = (text or "").strip()
-    sport = (sport or "").strip()
-    if sport == "OTRA":
-        sport = (sport_custom or "").strip()
+    sport_filter = (sport or "").strip() or None
 
-    sport_filter = sport if sport else None
+    # Coach siempre busca en su propio deporte — ignora lo que venga del dropdown
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or None
+    if coach_sport:
+        sport_filter = coach_sport
 
     try:
         if hasattr(db, "search_athletes"):
@@ -1027,54 +1111,185 @@ def coach_search_athletes(n, text, sport, sport_custom):
     except Exception:
         results = _fallback_search_athletes(text=text, sport=sport_filter, limit=50)
 
-    return results, f"{len(results)} deportista(s) encontrado(s)."
+    results_display = [{**r, "created_at": (r.get("created_at") or "")[:10]} for r in results]
+
+    try:
+        coach_id = int(session.get("user_id"))
+        roster = _coach_roster(coach_id)
+        roster_ids = {a["id"] for a in roster}
+    except Exception:
+        roster_ids = set()
+
+    return (
+        _render_search_results(results_display, roster_ids),
+        results_display,
+        f"{len(results)} deportista(s) encontrado(s).",
+    )
+
+
+def _render_team_members(members):
+    """Renderiza los miembros de un equipo como cards con botón Quitar directo."""
+    if not members:
+        return html.Div(
+            html.P("Este equipo aún no tiene miembros.", className="text-muted"),
+            style={"padding": "12px 0"},
+        )
+
+    def _ini(name):
+        parts = (name or "?").split()
+        return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+    _ABBREV = {"Taekwondo": "TKD", "Box": "BOX", "Boxeo": "BOX"}
+
+    cards = []
+    for m in members:
+        aid = m.get("athlete_id") or m.get("id")
+        sport = m.get("sport") or ""
+        since = (m.get("added_at") or m.get("created_at") or "")[:10]
+        cards.append(
+            html.Div(className="athlete-row", children=[
+                html.Div(_ini(m.get("name", "?")), className="athlete-row__avatar"),
+                html.Div(className="athlete-row__info", children=[
+                    html.Div(m.get("name", "—"), className="athlete-row__name"),
+                    html.Div(f"{sport} · desde {since}" if since else sport, className="athlete-row__meta"),
+                ]),
+                html.Span(
+                    _ABBREV.get(sport, sport[:3].upper()),
+                    className=f"sport-badge sport-badge--{sport.lower()}",
+                ),
+                html.Button(
+                    "Quitar",
+                    id={"type": "remove-member-btn", "index": aid},
+                    className="btn btn-ghost btn-xs",
+                    n_clicks=0,
+                ),
+            ])
+        )
+    return html.Div(className="plantilla-list", style={"marginTop": "8px"}, children=cards)
+
+
+def _render_search_results(results, roster_ids=None):
+    """Renderiza los resultados de búsqueda como cards con botón directo por atleta."""
+    roster_ids = set(roster_ids or [])
+    if not results:
+        return html.Div(
+            html.P("Sin resultados. Prueba con otro nombre o deporte.", className="text-muted"),
+            style={"padding": "16px 0"},
+        )
+
+    def _ini(name):
+        parts = (name or "?").split()
+        return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+    _ABBREV = {"Taekwondo": "TKD", "Box": "BOX", "Boxeo": "BOX"}
+
+    cards = []
+    for r in results:
+        aid = r.get("id")
+        sport = r.get("sport") or ""
+        in_roster = aid in roster_ids
+        cards.append(
+            html.Div(className="athlete-row", children=[
+                html.Div(_ini(r.get("name", "?")), className="athlete-row__avatar"),
+                html.Div(className="athlete-row__info", children=[
+                    html.Div(r.get("name", "—"), className="athlete-row__name"),
+                    html.Div(sport, className="athlete-row__meta"),
+                ]),
+                html.Span(
+                    _ABBREV.get(sport, sport[:3].upper()),
+                    className=f"sport-badge sport-badge--{sport.lower()}",
+                ),
+                html.Button(
+                    "✓ En plantilla" if in_roster else "+ Añadir",
+                    id={"type": "add-athlete-btn", "index": aid},
+                    className="btn btn-ghost btn-xs" if in_roster else "btn btn-primary btn-xs",
+                    disabled=in_roster,
+                    n_clicks=0,
+                ),
+            ])
+        )
+    return html.Div(className="plantilla-list", style={"marginTop": "12px"}, children=cards)
+
+
+def _render_plantilla(roster_display):
+    """Genera la lista visual de atletas de la plantilla."""
+    if not roster_display:
+        return html.Div(className="inner-card data-empty-state", children=[
+            html.P("Tu plantilla está vacía.", className="empty-state-title"),
+            html.P("Busca deportistas arriba y añádelos a tu plantilla.", className="text-muted"),
+        ])
+
+    def _ini(name):
+        parts = (name or "?").split()
+        return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+    _ABBREV = {"Taekwondo": "TKD", "Box": "BOX", "Boxeo": "BOX"}
+
+    return html.Div(className="plantilla-list", children=[
+        html.Div(className="athlete-row", children=[
+            html.Div(_ini(a.get("name", "?")), className="athlete-row__avatar"),
+            html.Div(className="athlete-row__info", children=[
+                html.Div(a.get("name", "—"), className="athlete-row__name"),
+                html.Div(
+                    f"{a.get('sport', '—')} · desde {a.get('created_at', '—')}",
+                    className="athlete-row__meta",
+                ),
+            ]),
+            html.Span(
+                _ABBREV.get(a.get("sport", ""), (a.get("sport") or "")[:3].upper()),
+                className=f"sport-badge sport-badge--{(a.get('sport') or '').lower()}",
+            ),
+        ]) for a in roster_display
+    ])
 
 
 def _refresh_roster_and_opts(coach_id: int):
     roster = _coach_roster(int(coach_id))
     roster_opts = [{"label": f"{a['name']} ({a.get('sport') or '-'})", "value": a["id"]} for a in roster]
-    return roster, roster_opts
+    roster_display = [{**a, "created_at": (a.get("created_at") or "")[:10]} for a in roster]
+    return roster_display, roster_opts
 
 
 @app.callback(
-    Output("tbl-roster", "data", allow_duplicate=True),
-    Output("team-add-athlete", "options", allow_duplicate=True),
-    Output("coach-roster-msg", "children", allow_duplicate=True),
-    Input("btn-roster-add", "n_clicks"),
-    State("tbl-search-athletes", "data"),
-    State("tbl-search-athletes", "selected_rows"),
+    Output("plantilla-list", "children"),
+    Output("plantilla-remove-dropdown", "options"),
+    Output("team-add-athlete", "options"),
+    Output("coach-roster-msg", "children"),
+    Output("search-results-container", "children", allow_duplicate=True),
+    Input({"type": "add-athlete-btn", "index": ALL}, "n_clicks"),
+    State("search-results-store", "data"),
     prevent_initial_call=True
 )
-def coach_add_to_roster(n, rows, selected_rows):
+def add_athlete_to_roster(n_clicks_list, stored_results):
+    if not any(n for n in (n_clicks_list or []) if n):
+        raise PreventUpdate
+
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    import json
+    try:
+        prop_id = ctx.triggered[0]["prop_id"]
+        btn_id = json.loads(prop_id.rsplit(".", 1)[0])
+        athlete_id = int(btn_id["index"])
+    except Exception:
+        raise PreventUpdate
+
     if _to_str(session.get("role")) != "coach":
-        return [], [], "No tienes permisos."
-    if not n:
         raise PreventUpdate
 
     try:
         coach_id = int(session.get("user_id"))
     except Exception:
-        return [], [], "Sesión inválida. Vuelve a iniciar sesión."
+        raise PreventUpdate
 
-    if not rows or not selected_rows:
-        roster, roster_opts = _refresh_roster_and_opts(coach_id)
-        return roster, roster_opts, "Selecciona un deportista de la tabla de búsqueda."
-
-    try:
-        athlete = rows[selected_rows[0]]
-        athlete_id = int(athlete.get("id"))
-    except Exception:
-        roster, roster_opts = _refresh_roster_and_opts(coach_id)
-        return roster, roster_opts, "Selección inválida."
-
-    # Adoptar atleta (preferido) o fallback a legacy coach_id
     try:
         if hasattr(db, "adopt_athlete_set_primary_if_empty"):
             db.adopt_athlete_set_primary_if_empty(coach_id, athlete_id)
         elif hasattr(db, "adopt_athlete"):
             db.adopt_athlete(coach_id, athlete_id)
         elif hasattr(db, "_get_conn"):
-            # fallback: asigna coach_id si está vacío
             with db._get_conn() as con:
                 cur = con.cursor()
                 cur.execute(
@@ -1086,41 +1301,41 @@ def coach_add_to_roster(n, rows, selected_rows):
         pass
 
     roster, roster_opts = _refresh_roster_and_opts(coach_id)
-    return roster, roster_opts, "Deportista agregado a tu roster."
+    roster_ids = {a["id"] for a in _coach_roster(coach_id)}
+    updated_search = _render_search_results(stored_results or [], roster_ids)
+    return _render_plantilla(roster), roster_opts, roster_opts, "Deportista añadido a la plantilla.", updated_search
 
 
 @app.callback(
-    Output("tbl-roster", "data", allow_duplicate=True),
+    Output("plantilla-list", "children", allow_duplicate=True),
+    Output("plantilla-remove-dropdown", "options", allow_duplicate=True),
     Output("team-add-athlete", "options", allow_duplicate=True),
     Output("coach-roster-msg", "children", allow_duplicate=True),
     Input("btn-roster-remove", "n_clicks"),
-    State("tbl-roster", "data"),
-    State("tbl-roster", "selected_rows"),
+    State("plantilla-remove-dropdown", "value"),
     prevent_initial_call=True
 )
-def coach_remove_from_roster(n, roster_rows, selected_rows):
+def coach_remove_from_roster(n, athlete_id_selected):
     if _to_str(session.get("role")) != "coach":
-        return [], [], "No tienes permisos."
+        return _render_plantilla([]), [], [], "No tienes permisos."
     if not n:
         raise PreventUpdate
 
     try:
         coach_id = int(session.get("user_id"))
     except Exception:
-        return [], [], "Sesión inválida. Vuelve a iniciar sesión."
+        return _render_plantilla([]), [], [], "Sesión inválida. Vuelve a iniciar sesión."
 
-    if not roster_rows or not selected_rows:
+    if not athlete_id_selected:
         roster, roster_opts = _refresh_roster_and_opts(coach_id)
-        return roster, roster_opts, "Selecciona un deportista de tu roster."
+        return _render_plantilla(roster), roster_opts, roster_opts, "Selecciona un deportista del desplegable."
 
     try:
-        athlete = roster_rows[selected_rows[0]]
-        athlete_id = int(athlete.get("id"))
+        athlete_id = int(athlete_id_selected)
     except Exception:
         roster, roster_opts = _refresh_roster_and_opts(coach_id)
-        return roster, roster_opts, "Selección inválida."
+        return _render_plantilla(roster), roster_opts, roster_opts, "Selección inválida."
 
-    # Quitar adopción (si existe) y también limpiar legacy (si aplica)
     try:
         if hasattr(db, "remove_adopted_athlete"):
             db.remove_adopted_athlete(coach_id, athlete_id)
@@ -1136,7 +1351,7 @@ def coach_remove_from_roster(n, roster_rows, selected_rows):
         pass
 
     roster, roster_opts = _refresh_roster_and_opts(coach_id)
-    return roster, roster_opts, "Deportista quitado del roster."
+    return _render_plantilla(roster), roster_opts, roster_opts, "Deportista retirado de la plantilla."
 
 
 @app.callback(
@@ -1146,10 +1361,9 @@ def coach_remove_from_roster(n, roster_rows, selected_rows):
     Input("btn-team-create", "n_clicks"),
     State("team-name", "value"),
     State("team-sport", "value"),
-    State("team-sport-custom", "value"),
     prevent_initial_call=True
 )
-def coach_create_team(n, name, sport, sport_custom):
+def coach_create_team(n, name, sport):
     if _to_str(session.get("role")) != "coach":
         return [], None, "No tienes permisos."
     if not n:
@@ -1161,10 +1375,7 @@ def coach_create_team(n, name, sport, sport_custom):
         return [], None, "Sesión inválida. Vuelve a iniciar sesión."
 
     name = (name or "").strip()
-    sport = (sport or "").strip()
-    if sport == "OTRA":
-        sport = (sport_custom or "").strip()
-    sport_val = sport if sport else None
+    sport_val = (sport or "").strip() or None
 
     if not name:
         teams = db.list_teams(coach_id) if hasattr(db, "list_teams") else []
@@ -1187,24 +1398,32 @@ def coach_create_team(n, name, sport, sport_custom):
     return team_opts, new_id, "Equipo creado." if new_id else "No se pudo crear el equipo."
 
 
+def _fmt_members(rows):
+    return [{**r, "added_at": (r.get("added_at") or "")[:10]} for r in (rows or [])]
+
+
 @app.callback(
-    Output("tbl-team-members", "data"),
+    Output("team-members-container", "children"),
+    Output("team-members-store", "data"),
     Input("team-select", "value"),
 )
 def coach_load_team_members(team_id):
     if not team_id:
-        return []
+        return html.Div(html.P("Selecciona un equipo para ver sus miembros.", className="text-muted"),
+                        style={"padding": "12px 0"}), []
     if not hasattr(db, "list_team_members"):
-        return []
+        return _render_team_members([]), []
     try:
-        return db.list_team_members(int(team_id)) or []
+        members = _fmt_members(db.list_team_members(int(team_id)))
+        return _render_team_members(members), members
     except Exception:
-        return []
+        return _render_team_members([]), []
 
 
 @app.callback(
-    Output("tbl-team-members", "data", allow_duplicate=True),
-    Output("team-msg", "children", allow_duplicate=True),
+    Output("team-members-container", "children", allow_duplicate=True),
+    Output("team-members-store", "data", allow_duplicate=True),
+    Output("team-msg", "children"),
     Input("btn-team-add-member", "n_clicks"),
     State("team-select", "value"),
     State("team-add-athlete", "value"),
@@ -1212,72 +1431,82 @@ def coach_load_team_members(team_id):
 )
 def coach_add_team_member(n, team_id, athlete_id):
     if _to_str(session.get("role")) != "coach":
-        return [], "No tienes permisos."
+        return dash.no_update, dash.no_update, "No tienes permisos."
     if not n:
         raise PreventUpdate
-
     if not team_id:
-        return [], "Selecciona un equipo."
+        return dash.no_update, dash.no_update, "Selecciona un equipo."
     if not athlete_id:
-        current = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-        return current or [], "Selecciona un deportista."
-
+        return dash.no_update, dash.no_update, "Selecciona un deportista."
     if not hasattr(db, "add_team_member"):
-        current = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-        return current or [], "Tu db.py todavía no soporta equipos (add_team_member)."
-
+        return dash.no_update, dash.no_update, "db.py no soporta equipos aún (add_team_member)."
     try:
         db.add_team_member(int(team_id), int(athlete_id), role_label=None)
     except Exception:
         pass
-
-    members = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-    return members or [], "Miembro agregado."
+    members = _fmt_members(db.list_team_members(int(team_id))) if hasattr(db, "list_team_members") else []
+    return _render_team_members(members), members, "Miembro agregado."
 
 
 @app.callback(
-    Output("tbl-team-members", "data", allow_duplicate=True),
+    Output("team-members-container", "children", allow_duplicate=True),
+    Output("team-members-store", "data", allow_duplicate=True),
     Output("team-msg", "children", allow_duplicate=True),
-    Input("btn-team-remove-member", "n_clicks"),
+    Input({"type": "remove-member-btn", "index": ALL}, "n_clicks"),
     State("team-select", "value"),
-    State("tbl-team-members", "data"),
-    State("tbl-team-members", "selected_rows"),
     prevent_initial_call=True
 )
-def coach_remove_team_member(n, team_id, member_rows, selected_rows):
-    if _to_str(session.get("role")) != "coach":
-        return [], "No tienes permisos."
-    if not n:
+def coach_remove_team_member(n_clicks_list, team_id):
+    if not any(n for n in (n_clicks_list or []) if n):
+        raise PreventUpdate
+
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    import json
+    try:
+        prop_id = ctx.triggered[0]["prop_id"]
+        btn_id = json.loads(prop_id.rsplit(".", 1)[0])
+        athlete_id = int(btn_id["index"])
+    except Exception:
         raise PreventUpdate
 
     if not team_id:
-        return [], "Selecciona un equipo."
-    if not member_rows or not selected_rows:
-        current = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-        return current or [], "Selecciona un miembro."
-
-    # La fila trae athlete_id (según el schema de db)
-    try:
-        row = member_rows[selected_rows[0]]
-        athlete_id = int(row.get("athlete_id") or row.get("id"))
-    except Exception:
-        current = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-        return current or [], "Selección inválida."
-
+        raise PreventUpdate
     if not hasattr(db, "remove_team_member"):
-        current = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-        return current or [], "Tu db.py todavía no soporta equipos (remove_team_member)."
-
+        return dash.no_update, dash.no_update, "db.py no soporta equipos aún (remove_team_member)."
     try:
         db.remove_team_member(int(team_id), int(athlete_id))
     except Exception:
         pass
+    members = _fmt_members(db.list_team_members(int(team_id))) if hasattr(db, "list_team_members") else []
+    return _render_team_members(members), members, "Miembro retirado del equipo."
 
-    members = db.list_team_members(int(team_id)) if hasattr(db, "list_team_members") else []
-    return members or [], "Miembro quitado."
+def _athlete_sheet_fold(title, hint, body_children, open_by_default=False):
+    return html.Details(
+        className="card collapsible-card",
+        open=open_by_default,
+        children=[
+            html.Summary(
+                className="collapsible-card__summary",
+                children=[
+                    html.Div(
+                        className="collapsible-card__head",
+                        children=[
+                            html.H4(title, className="card-title"),
+                            html.P(hint, className="text-muted"),
+                        ],
+                    ),
+                    html.Span(">", className="collapsible-card__chevron"),
+                ],
+            ),
+            html.Div(className="collapsible-card__body", children=body_children),
+        ],
+    )
 
-# ---- PERFIL DE DEPORTISTA (para coach) ----
-def view_deportista():
+
+def view_deportista_v2():
     if not session.get("user_id"):
         return html.Div("Inicia sesión para ver esta página.")
     role = _to_str(session.get("role")) or "no autenticado"
@@ -1285,150 +1514,372 @@ def view_deportista():
         return html.Div("No tienes permisos para ver esta sección (solo coach).", className="muted")
 
     coach_id = session.get("user_id")
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or "Deporte de combate"
     athletes = _coach_roster(int(coach_id)) if coach_id else []
     options_users = [
-        {"label": f"{u['name']} · {u.get('sport', '-')}", "value": u["id"]}
+        {"label": f"{u['name']} | {u.get('sport', '-')}", "value": u["id"]}
         for u in athletes
     ]
     default_val = options_users[0]["value"] if options_users else None
 
     return html.Div([
-        h2("Perfil de deportista"),
-        html.Small("Selecciona un deportista para ver sus datos, contacto y últimas métricas.",
-                   style={"opacity": 0.8}),
-        html.Br(),
-        html.Label("Deportista"),
-        dcc.Dropdown(
-            id="athlete-select",
-            options=options_users,
-            value=default_val,
-            placeholder="Selecciona deportista..."
-        ),
-        html.Br(),
-        html.Div(id="athlete-card")
-    ])
+        html.Div(className="profile-hero-grid", children=[
+            html.Div(className="page-head profile-hero", children=[
+                html.Div(className="session-pill-row", children=[
+                    html.Span(coach_sport, className="session-pill"),
+                    html.Span("Coach", className="session-pill session-pill--muted"),
+                ]),
+                html.H2("Ficha de atleta"),
+                html.P(
+                    "Aquí revisas el contexto de cada deportista antes de ajustar carga, seguimiento o análisis.",
+                    className="text-muted",
+                ),
+            ]),
+            html.Div(className="card profile-focus-card", children=[
+                html.H4("Qué puedes resolver aquí", className="card-title"),
+                html.P(
+                    "Elige a un atleta y confirma rápido cómo llega, qué conviene vigilar y qué dato te falta para decidir mejor.",
+                    className="text-muted",
+                ),
+                html.Ul([
+                    html.Li([html.Strong("Plantilla disponible: "), f"{len(options_users)} atleta{'s' if len(options_users) != 1 else ''}"]),
+                    html.Li([html.Strong("Primero: "), "elige a quién quieres revisar hoy."]),
+                    html.Li([html.Strong("Después: "), "entra al detalle solo en lo que necesites confirmar."]),
+                ], className="list-compact"),
+            ]),
+        ]),
+        html.Div(className="card", children=[
+            html.H4("Seleccionar deportista", className="card-title"),
+            html.P(
+                "Busca aquí al atleta que quieres revisar sin salir de esta vista.",
+                className="text-muted",
+            ),
+            html.Div(className="filter-item", children=[
+                html.Label("Deportista"),
+                dcc.Dropdown(
+                    id="athlete-select-v2",
+                    options=options_users,
+                    value=default_val,
+                    placeholder="Selecciona deportista de tu plantilla...",
+                ),
+            ]),
+        ]),
+        html.Div(id="athlete-card-v2", style={"marginTop": "16px"}),
+    ], className="page-content profile-shell")
 
 
 @app.callback(
-    Output("athlete-card", "children"),
-    Input("athlete-select", "value"),
+    Output("athlete-card-v2", "children"),
+    Input("athlete-select-v2", "value"),
     prevent_initial_call=False
 )
-def render_athlete_card(user_id):
+def render_athlete_card_v2(user_id):
     role = _to_str(session.get("role")) or "no autenticado"
     coach_id = session.get("user_id")
 
     if role != "coach":
-        return html.Div("No tienes permisos para ver esta sección.", className="muted")
-    if not user_id:
-        return html.Div("Selecciona un deportista en la lista de arriba.")
+        return None
+
+    try:
+        selected_id = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        selected_id = None
+
+    if not selected_id:
+        return html.Div(className="inner-card data-empty-state", children=[
+            html.P("Selecciona un deportista de tu plantilla.", className="empty-state-title"),
+            html.P("Aquí verás su contexto deportivo, su lectura reciente y lo más importante para hoy.", className="text-muted"),
+        ])
 
     athletes = _coach_roster(int(coach_id)) if coach_id else []
-    if not any(a["id"] == user_id for a in athletes):
-        return html.Div("Este deportista no pertenece a tu equipo.", className="muted")
+    if not any(int(a["id"]) == selected_id for a in athletes if a.get("id") is not None):
+        return html.Div("Este deportista no pertenece a tu equipo.", className="text-muted")
 
-    u = db.get_user_by_id(int(user_id))
+    u = db.get_user_by_id(selected_id)
     if not u:
         return html.Div("No se encontró el deportista seleccionado.")
 
-    name = u.get("name", "Sin nombre")
-    sport = u.get("sport", "—")
-    urole = u.get("role", "deportista")
-    created_at = u.get("created_at", "—")
-
-    email = u.get("email") or u.get("correo") or None
+    name = _profile_label(u.get("name"), "Sin nombre")
+    sport = _profile_label(u.get("sport"), "Deporte sin definir")
+    created = (u.get("created_at") or "")[:10] or "-"
+    email = u.get("email") or None
 
     try:
-        qrows = db.list_questionnaires(int(user_id))
+        qrows = db.list_questionnaires(selected_id) or []
     except Exception:
         qrows = []
     last_q = qrows[0] if qrows else None
     wellness = float(last_q["wellness_score"]) if last_q and last_q.get("wellness_score") is not None else None
-    q_date = last_q["ts"] if last_q else "Sin cuestionarios"
+    q_date = (last_q.get("ts") or "").replace("T", " ")[:16] if last_q else None
+    latest_answers = {}
+    if last_q and last_q.get("answers_json"):
+        try:
+            raw_answers = last_q.get("answers_json") or "{}"
+            latest_answers = json.loads(raw_answers) if isinstance(raw_answers, str) else (raw_answers or {})
+        except Exception:
+            latest_answers = {}
 
     try:
-        last_ecg = db.get_last_ecg_metrics(int(user_id))
+        last_ecg = db.get_last_ecg_metrics(selected_id)
     except Exception:
         last_ecg = None
 
     try:
-        sens_codes = db.get_user_sensors(int(user_id))
+        sens_codes = db.get_user_sensors(selected_id) or []
     except Exception:
         sens_codes = []
-    sens_labels = [S.catalog()[c]["name"] for c in sens_codes] if sens_codes else []
-
-    blocks = [
-        html.H3(name, className="card-title"),
-        html.Div(f"Rol: {urole} · Deporte: {sport}"),
-        html.Div(f"Alta en el sistema: {created_at}",
-                 style={"opacity": 0.8, "fontSize": "13px", "marginTop": "4px"}),
-        html.Hr(),
-        html.H4("Contacto"),
-        html.Div(f"Email: {email}" if email else "Email: no disponible"),
-    ]
-    if email:
-        blocks.append(
-            html.A(
-                "Enviar correo",
-                href=f"mailto:{email}",
-                className="btn btn-primary",
-                style={"display": "inline-block", "marginTop": "6px"}
-            )
-        )
-
-    blocks.append(html.Hr())
-    blocks.append(html.H4("Último cuestionario de bienestar"))
-    if wellness is not None:
-        blocks.append(html.Div(f"Wellness: {wellness:.1f} / 100"))
-        blocks.append(html.Div(f"Fecha: {q_date}", style={"opacity": 0.8, "fontSize": "13px"}))
-    else:
-        blocks.append(html.Div("Sin cuestionarios registrados."))
-
-    blocks.append(html.Hr())
-    blocks.append(html.H4("Últimas métricas de ECG"))
-    if last_ecg:
-        blocks.append(html.Div(f"BPM: {last_ecg.get('bpm', 0):.0f}"))
-        blocks.append(html.Div(f"SDNN: {last_ecg.get('sdnn', 0):.0f} ms"))
-        blocks.append(html.Div(f"RMSSD: {last_ecg.get('rmssd', 0):.0f} ms"))
-    else:
-        blocks.append(html.Div("Sin registros ECG guardados."))
+    sens_labels = [S.catalog()[c]["name"] for c in sens_codes if c in S.catalog()]
 
     try:
-        athlete_profile = db.get_athlete_profile(int(user_id)) if hasattr(db, "get_athlete_profile") else _profile_defaults()
+        ap = db.get_athlete_profile(selected_id) if hasattr(db, "get_athlete_profile") else _profile_defaults()
     except Exception:
-        athlete_profile = _profile_defaults()
+        ap = _profile_defaults()
 
-    blocks.append(html.Hr())
-    blocks.append(html.H4("Perfil deportivo"))
-    blocks.append(html.Ul([
-        html.Li([html.Strong("Nivel competitivo: "), _profile_label(athlete_profile.get("competitive_level"))]),
-        html.Li([html.Strong("Categoría / peso: "), _profile_label(athlete_profile.get("weight_category"))]),
-        html.Li([html.Strong("Lado dominante: "), _profile_label(athlete_profile.get("dominant_side"))]),
-        html.Li([html.Strong("Estado actual: "), _profile_label(athlete_profile.get("current_status"))]),
-        html.Li([html.Strong("Zona a vigilar: "), _profile_label(athlete_profile.get("watch_zone"))]),
-        html.Li([html.Strong("Cercanía a competencia: "), _profile_label(athlete_profile.get("competition_proximity"))]),
-    ], className="list-compact"))
-    blocks.append(html.Div([
-        html.Strong("Nota de contexto: "),
-        html.Span(_profile_label(athlete_profile.get("profile_note"), "Sin nota todavía."))
-    ], style={"marginTop": "6px", "opacity": 0.88}))
+    try:
+        weekly_summary = db.get_weekly_load_summary(selected_id) if hasattr(db, "get_weekly_load_summary") else {}
+    except Exception:
+        weekly_summary = {}
 
-    blocks.append(html.Hr())
-    blocks.append(html.H4("Sensores asignados"))
-    if sens_labels:
-        blocks.append(html.Ul([html.Li(lbl) for lbl in sens_labels]))
-    else:
-        blocks.append(html.Div("No hay sensores asignados."))
+    try:
+        recent_sessions = db.list_sessions(selected_id, limit=3) if hasattr(db, "list_sessions") else []
+    except Exception:
+        recent_sessions = []
 
-    return html.Div(
-        className="inner-card",
-        style={
-            "padding": "16px",
-            "borderRadius": "12px",
-            "maxWidth": "620px"
-        },
-        children=blocks
+    abbrev = {"Taekwondo": "TKD", "Box": "BOX", "Boxeo": "BOX"}
+    weekly_flag_labels = {
+        "green": "Semana sólida",
+        "yellow": "Semana con atención",
+        "red": "Carga a revisar",
+        "gray": "Sin datos",
+    }
+    trend_labels = {
+        "up": "Carga subiendo",
+        "down": "Carga bajando",
+        "stable": "Carga estable",
+    }
+
+    def initials(full_name):
+        parts = (full_name or "?").split()
+        return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+    def fmt_datetime(value, fallback="Sin registro"):
+        if not value:
+            return fallback
+        return str(value).replace("T", " ")[:16]
+
+    def readiness_state(score):
+        if score is None:
+            return "Sin check-in", "Todavía no hay lectura del día."
+        if score < 50:
+            return "Día para ajustar", "Conviene bajar exigencia y revisar molestias antes de apretar."
+        if score < 70:
+            return "Listo con control", "Hay base para trabajar, pero conviene vigilar recuperación y sensación corporal."
+        return "Listo para trabajar", "Tiene una base sólida para sostener la sesión de hoy."
+
+    wellness_value = f"{wellness:.0f}/100" if wellness is not None else "Sin datos"
+    readiness_title, readiness_hint = readiness_state(wellness)
+    bpm_val = f"{last_ecg.get('bpm', 0):.0f} bpm" if last_ecg and last_ecg.get("bpm") is not None else "Sin ECG"
+    sdnn_val = f"{last_ecg.get('sdnn', 0):.0f} ms" if last_ecg and last_ecg.get("sdnn") is not None else "Sin dato"
+    rmssd_val = f"{last_ecg.get('rmssd', 0):.0f} ms" if last_ecg and last_ecg.get("rmssd") is not None else "Sin dato"
+    session_count = weekly_summary.get("n_sessions", 0)
+    load_units = weekly_summary.get("load_units")
+    weekly_load = f"{load_units} UA" if load_units is not None else "Sin carga"
+    weekly_flag = (weekly_summary.get("flag") or "gray").strip().lower()
+    trend = (weekly_summary.get("trend") or "stable").strip().lower()
+    level_chip = _profile_label(ap.get("competitive_level"), "Seguimiento activo")
+    current_status = _profile_label(ap.get("current_status"), "Sin estado definido")
+    watch_zone = _profile_label(ap.get("watch_zone"), "Sin zona marcada")
+    competition_proximity = _profile_label(ap.get("competition_proximity"), "Sin competencia cercana")
+    weekly_flag_label = weekly_flag_labels.get(weekly_flag, "Sin datos")
+    trend_label = trend_labels.get(trend, "Carga estable")
+    sensor_value = f"{len(sens_labels)} activo{'s' if len(sens_labels) != 1 else ''}" if sens_labels else "Sin sensores"
+
+    hero = html.Div(className="profile-hero-grid", children=[
+        html.Div(className="page-head profile-hero", children=[
+            html.Div(className="session-pill-row", children=[
+                html.Span(sport, className="session-pill"),
+                html.Span(level_chip, className="session-pill session-pill--muted"),
+            ]),
+            html.Div(className="athlete-profile-header", children=[
+                html.Div(className="athlete-row__avatar athlete-row__avatar--lg", children=initials(name)),
+                html.Div(className="athlete-row__info", children=[
+                    html.Div(name, className="athlete-row__name athlete-name--lg"),
+                    html.Div(f"{sport} | en seguimiento desde {created}", className="athlete-row__meta"),
+                ]),
+                html.Span(
+                    abbrev.get(sport, sport[:3].upper()),
+                    className=f"sport-badge sport-badge--{sport.lower()}",
+                ),
+            ]),
+            html.P(
+                "Aquí confirmas cómo llega hoy, qué arrastra de contexto y dónde conviene poner la atención antes de decidir.",
+                className="text-muted",
+            ),
+        ]),
+        html.Div(className="card profile-focus-card", children=[
+            html.H4("Qué conviene mirar primero", className="card-title"),
+            html.P(
+                "Empieza por el estado del día y luego confirma recuperación, carga reciente y cualquier zona a vigilar.",
+                className="text-muted",
+            ),
+            html.Ul([
+                html.Li([html.Strong("Estado del día: "), f"{readiness_title} ({wellness_value})"]),
+                html.Li([html.Strong("Último check-in: "), q_date or "Sin registro todavía"]),
+                html.Li([html.Strong("Recuperación cardiovascular: "), bpm_val]),
+                html.Li([html.Strong("Atención actual: "), watch_zone if watch_zone != "Sin zona marcada" else competition_proximity]),
+            ], className="list-compact"),
+        ]),
+    ])
+
+    metrics = html.Div(className="kpis profile-kpis", children=[
+        html.Div(className="kpi", children=[
+            html.Div("Estado del día", className="kpi-label"),
+            html.Div(wellness_value, className="kpi-value"),
+            html.Div(readiness_hint, className="kpi-sub"),
+            html.Div(className="kpi-ecg-line"),
+        ]),
+        html.Div(className="kpi", children=[
+            html.Div("Recuperación cardiovascular", className="kpi-label"),
+            html.Div(bpm_val, className="kpi-value"),
+            html.Div(f"SDNN {sdnn_val} | RMSSD {rmssd_val}", className="kpi-sub"),
+            html.Div(className="kpi-ecg-line"),
+        ]),
+        html.Div(className="kpi", children=[
+            html.Div("Semana actual", className="kpi-label"),
+            html.Div(str(session_count), className="kpi-value"),
+            html.Div(f"{weekly_load} | {trend_label}", className="kpi-sub"),
+            html.Div(className="kpi-ecg-line"),
+        ]),
+        html.Div(className="kpi", children=[
+            html.Div("Sensores activos", className="kpi-label"),
+            html.Div(sensor_value, className="kpi-value", style={"fontSize": "22px"}),
+            html.Div("Disponibles para seguir recuperación y movimiento", className="kpi-sub"),
+            html.Div(className="kpi-ecg-line"),
+        ]),
+    ])
+
+    context_fold = _athlete_sheet_fold(
+        "Resumen del atleta",
+        "Aquí ves el contexto base con el que conviene leer su día.",
+        [
+            html.Div(className="profile-context-grid", children=[
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Estado actual", className="kpi-label"),
+                    html.Div(current_status, className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Nivel competitivo", className="kpi-label"),
+                    html.Div(level_chip, className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Categoría / peso", className="kpi-label"),
+                    html.Div(_profile_label(ap.get("weight_category")), className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Lado dominante", className="kpi-label"),
+                    html.Div(_profile_label(ap.get("dominant_side")), className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Zona a vigilar", className="kpi-label"),
+                    html.Div(watch_zone, className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+                html.Div(className="profile-grid-item", children=[
+                    html.Div("Competencia", className="kpi-label"),
+                    html.Div(competition_proximity, className="kpi-value", style={"fontSize": "18px"}),
+                ]),
+            ]),
+            html.Div(className="profile-note", children=[
+                html.Strong("Nota de contexto: "),
+                html.Span(_profile_label(ap.get("profile_note"), "Todavía no hay una nota añadida para este deportista.")),
+            ]),
+        ],
+        open_by_default=True,
     )
+
+    recent_session_items = []
+    for session_row in recent_sessions[:3]:
+        session_date = fmt_datetime(session_row.get("ts_start"), "Fecha pendiente")
+        session_status = "abierta" if (session_row.get("status") or "").strip().lower() == "open" else "cerrada"
+        session_sport = _profile_label(session_row.get("sport"), sport)
+        recent_session_items.append(
+            html.Li(f"{session_date} | {session_sport} | sesión {session_status}")
+        )
+    if not recent_session_items:
+        recent_session_items = [html.Li("Todavía no hay sesiones recientes registradas.")]
+
+    signal_fold = _athlete_sheet_fold(
+        "Seguimiento reciente",
+        "Aquí confirmas lo último que dejó el deportista antes de decidir.",
+        [
+            html.Ul([
+                html.Li([html.Strong("Check-in reciente: "), q_date or "Sin registro todavía"]),
+                html.Li([html.Strong("Lectura del día: "), f"{readiness_title} | {wellness_value}"]),
+                html.Li([html.Strong("Semana actual: "), f"{session_count} sesiones | {weekly_load} | {weekly_flag_label}"]),
+                html.Li([html.Strong("Tendencia de carga: "), trend_label]),
+            ], className="list-compact"),
+            html.Div(className="spacer-10"),
+            html.H4("Últimas sesiones", className="card-title"),
+            html.Ul(recent_session_items, className="list-compact"),
+        ],
+        open_by_default=True,
+    )
+
+    if latest_answers:
+        answer_items = [
+            html.Li(f"{str(k).replace('_', ' ').capitalize()}: {v}")
+            for k, v in list(latest_answers.items())[:4]
+        ]
+    else:
+        answer_items = [html.Li("Todavía no hay respuestas recientes para ampliar el contexto del día.")]
+
+    detail_fold = _athlete_sheet_fold(
+        "Puntos finos del contexto",
+        "Detalle adicional del último cuestionario y del contexto reciente.",
+        [
+            html.H4("Señales del último cuestionario", className="card-title"),
+            html.Ul(answer_items, className="list-compact"),
+        ],
+        open_by_default=False,
+    )
+
+    resources_card = html.Div(className="card profile-links-card", children=[
+        html.H4("Contacto y acciones útiles", className="card-title"),
+        html.P(
+            "Correo, sensores y accesos rápidos para seguir el caso con más contexto.",
+            className="text-muted",
+        ),
+        html.Div(className="profile-note", children=[
+            html.Strong("Correo: "),
+            html.Span(email or "No disponible"),
+        ]),
+        html.Div(className="spacer-10"),
+        html.H4("Sensores asignados", className="card-title"),
+        html.Div(className="teammate-chips", children=[
+            html.Span(lbl, className="teammate-chip") for lbl in sens_labels
+        ]) if sens_labels else html.P("No tiene sensores asignados todavía.", className="text-muted"),
+        html.Div(className="spacer-10"),
+        html.Div(className="row-wrap-10 session-action-row", children=[
+            html.A("Enviar correo", href=f"mailto:{email}", className="btn btn-primary") if email else None,
+            dcc.Link(html.Button("Ir a análisis", className="btn btn-ghost"), href="/ecg"),
+            dcc.Link(html.Button("Abrir comparativa", className="btn btn-ghost"), href="/comparar"),
+            dcc.Link(html.Button("Volver al equipo", className="btn btn-ghost"), href="/usuarios"),
+        ]),
+    ])
+
+    return html.Div(className="coach-stack", children=[
+        hero,
+        metrics,
+        html.Div(className="profile-main-grid", children=[
+            html.Div(className="profile-stack", children=[
+                context_fold,
+                detail_fold,
+            ]),
+            html.Div(className="profile-stack", children=[
+                signal_fold,
+                resources_card,
+            ]),
+        ]),
+    ])
 
 
 # ---- ANUNCIOS AL EQUIPO (para coach) ----
@@ -1440,52 +1891,97 @@ def view_anuncios():
         return html.Div("No tienes permisos para ver esta sección (solo coach).", className="muted")
 
     coach_id = session.get("user_id")
-    athletes = _coach_roster(int(coach_id)) if coach_id else []
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or None
 
-    emails = []
-    for u in athletes:
-        addr = u.get("email") or u.get("correo")
-        if addr:
-            emails.append(addr)
+    # Usa filtro de deporte del coach
+    athletes = []
+    if coach_id:
+        try:
+            import inspect as _inspect
+            for _fn in ("list_roster_for_coach", "list_my_athletes", "list_athletes_for_coach"):
+                if hasattr(db, _fn):
+                    _sig = _inspect.signature(getattr(db, _fn))
+                    if "sport" in _sig.parameters:
+                        athletes = getattr(db, _fn)(int(coach_id), sport=coach_sport) or []
+                    else:
+                        athletes = getattr(db, _fn)(int(coach_id)) or []
+                    if athletes:
+                        break
+        except Exception:
+            athletes = []
+    if coach_sport:
+        athletes = [a for a in athletes if not a.get("sport") or a["sport"] == coach_sport]
 
-    emails_str = ", ".join(emails) if emails else "No hay correos disponibles."
+    emails = [u.get("email") or u.get("correo") for u in athletes if u.get("email") or u.get("correo")]
     mailto_link = f"mailto:?bcc={','.join(emails)}" if emails else "#"
+    sport_label = coach_sport.title() if coach_sport else "tu equipo"
+
+    # Filas de atleta con email
+    def _athlete_row(u):
+        addr = u.get("email") or u.get("correo") or ""
+        name = u.get("name") or "Sin nombre"
+        return html.Div(
+            className="btn-save-row",
+            style={"padding": "8px 0", "borderBottom": "1px solid var(--line)"},
+            children=[
+                html.Span(name, style={"fontWeight": "600", "minWidth": "160px", "display": "inline-block"}),
+                html.Span(addr or "Sin correo", className="text-muted", style={"fontSize": "13px"}),
+            ],
+        )
+
+    athlete_rows = [_athlete_row(u) for u in athletes] if athletes else [
+        html.P("No hay deportistas en tu plantilla todavía.", className="text-muted")
+    ]
 
     return html.Div([
-        h2("Anuncios al equipo"),
-        html.P(
-            "Desde aquí puedes copiar todos los correos de tus deportistas o abrir tu cliente de correo "
-            "con un mensaje dirigido a todos (usando BCC)."
-        ),
-        html.H4("Correos del equipo"),
-        html.Div(
-            emails_str,
-            className="inner-card",
-            style={
-                "padding": "10px",
-                "borderRadius": "8px",
-                "fontFamily": "monospace",
-                "fontSize": "13px"
-            }
-        ),
-        html.Br(),
-        html.A(
-            "Redactar anuncio al equipo",
-            href=mailto_link,
-            className="btn btn-primary",
-            style={
-                "display": "inline-block",
-                "pointerEvents": "auto" if emails else "none",
-                "opacity": 1.0 if emails else 0.4
-            }
-        ),
-        html.Div(
-            "Tip: el anuncio se envía por correo. Más adelante podríamos guardar los avisos en la app "
-            "como un tablón de anuncios.",
-            className="muted",
-            style={"marginTop": "12px", "fontSize": "13px", "opacity": 0.8}
-        )
-    ], style={"maxWidth": "800px"})
+        html.Div(className="page-head", children=[
+            html.H2("Comunicados"),
+            html.P(
+                f"Contacta con los {len(athletes)} deportistas de {sport_label} por correo electrónico.",
+                className="text-muted",
+            ),
+        ]),
+        html.Hr(className="ecg-divider"),
+
+        # Card: correos del equipo
+        html.Div(className="card", style={"marginBottom": "16px"}, children=[
+            html.H4("Correos del equipo", className="card-title"),
+            html.P(
+                "Lista de deportistas con correo registrado. Puedes copiarlos o usar el botón de abajo.",
+                className="text-muted",
+                style={"marginBottom": "14px"},
+            ),
+            html.Div(athlete_rows),
+        ]),
+
+        # Card: acción
+        html.Div(className="card", children=[
+            html.H4("Redactar mensaje", className="card-title"),
+            html.P(
+                "Abre tu cliente de correo con todos los destinatarios en BCC para enviar el comunicado.",
+                className="text-muted",
+                style={"marginBottom": "14px"},
+            ),
+            html.Div(className="btn-save-row", children=[
+                html.A(
+                    "Abrir cliente de correo (BCC)",
+                    href=mailto_link,
+                    className="btn btn-primary" if emails else "btn btn-primary btn-disabled",
+                    style={"pointerEvents": "auto" if emails else "none", "opacity": 1.0 if emails else 0.4},
+                ),
+                html.Span(
+                    f"{len(emails)} destinatario{'s' if len(emails) != 1 else ''}" if emails else "Sin destinatarios",
+                    className="text-muted",
+                    style={"fontSize": "12px"},
+                ),
+            ]),
+            html.P(
+                "Tip: más adelante podrás enviar avisos directamente desde la app con historial de mensajes.",
+                className="text-muted",
+                style={"marginTop": "12px", "fontSize": "12px"},
+            ),
+        ]),
+    ])
 
 
 # ---- CONTACTO COACH (para deportista) ----
@@ -1928,6 +2424,266 @@ def _session_recommendations(blueprint: dict, readiness_score=None, role: str = 
 
 
 # === SESIÓN COMO HUB CONTEXTUAL ===
+def _coach_jornada_layout_v2(uid_int: int, sport: str):
+    """
+    CS-COACH-002B - Mi jornada compacta v1
+    Reduce la sensación de saturación usando bloques desplegables sin tocar
+    la lógica operativa de la jornada.
+    """
+    coach_id = uid_int
+    roster = _coach_roster(int(coach_id)) if coach_id else []
+    athlete_count = len(roster)
+    latest_checkins = 0
+    athletes_with_ecg = 0
+    focus_names = []
+    pending_names = []
+
+    for athlete in roster[:]:
+        aid = athlete.get("id")
+        athlete_name = athlete.get("name") or "Deportista"
+        if aid is None:
+            continue
+
+        has_checkin = False
+        try:
+            qrows = db.list_questionnaires(int(aid)) or []
+            has_checkin = bool(qrows)
+            if has_checkin:
+                latest_checkins += 1
+        except Exception:
+            has_checkin = False
+
+        has_ecg = False
+        try:
+            has_ecg = bool(db.get_last_ecg_metrics(int(aid)))
+            if has_ecg:
+                athletes_with_ecg += 1
+        except Exception:
+            has_ecg = False
+
+        if (has_checkin or has_ecg) and len(focus_names) < 4:
+            focus_names.append(athlete_name)
+        if not has_checkin and len(pending_names) < 4:
+            pending_names.append(athlete_name)
+
+    ref_sport = sport or ((roster[0].get("sport") if roster else "") or "")
+    blueprint = _session_blueprint_for_sport(ref_sport, role="coach")
+    recommendations = _session_recommendations(blueprint, None, role="coach")
+    session_chip = _session_structure_chip(blueprint["modo"])
+    focus_preview = ", ".join(focus_names[:3]) if focus_names else "Todavía no hay deportistas priorizados con lectura reciente."
+
+    def journey_fold(title, hint, body_children, open_by_default=False):
+        return html.Details(
+            className="card collapsible-card",
+            open=open_by_default,
+            children=[
+                html.Summary(
+                    className="collapsible-card__summary",
+                    children=[
+                        html.Div(
+                            className="collapsible-card__head",
+                            children=[
+                                html.H4(title, className="card-title"),
+                                html.P(hint, className="text-muted"),
+                            ],
+                        ),
+                        html.Span(">", className="collapsible-card__chevron"),
+                    ],
+                ),
+                html.Div(className="collapsible-card__body", children=body_children),
+            ],
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                className="session-hero-grid",
+                children=[
+                    html.Div(
+                        className="page-head session-hero",
+                        children=[
+                            html.Div(
+                                className="session-pill-row",
+                                children=[
+                                    html.Span(ref_sport or "Deporte de combate", className="session-pill"),
+                                    html.Span(session_chip, className="session-pill session-pill--muted"),
+                                ],
+                            ),
+                            html.H2("Mi jornada"),
+                            html.P(
+                                "Aquí ordenas el día del equipo: a quién revisar primero, cómo abrir la sesión y qué confirmar antes de ajustar la carga.",
+                                className="text-muted",
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="card session-focus-card",
+                        children=[
+                            html.H4("Qué conviene revisar primero", className="card-title"),
+                            html.P(
+                                "Empieza por quienes ya dejaron una lectura útil para tomar decisiones con mejor contexto.",
+                                className="text-muted",
+                            ),
+                            html.Ul(
+                                [
+                                    html.Li([html.Strong("Lecturas del día: "), f"{latest_checkins} de {athlete_count}"]),
+                                    html.Li([html.Strong("Señales listas: "), f"{athletes_with_ecg} de {athlete_count}"]),
+                                    html.Li([html.Strong("Prioridad rápida: "), focus_preview]),
+                                ],
+                                className="list-compact",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(
+                className="kpis session-kpis",
+                children=[
+                    html.Div(
+                        className="kpi",
+                        children=[
+                            html.Div("Plan guía del día", className="kpi-label"),
+                            html.Div(blueprint["tipo"], className="kpi-value", style={"fontSize": "22px"}),
+                            html.Div(blueprint["objetivo_desc"], className="kpi-sub"),
+                            html.Div(className="kpi-ecg-line"),
+                        ],
+                    ),
+                    html.Div(
+                        className="kpi",
+                        children=[
+                            html.Div("Lecturas listas", className="kpi-label"),
+                            html.Div(f"{latest_checkins} / {athlete_count}", className="kpi-value"),
+                            html.Div("Deportistas con check-in reciente para abrir la jornada con contexto.", className="kpi-sub"),
+                            html.Div(className="kpi-ecg-line"),
+                        ],
+                    ),
+                    html.Div(
+                        className="kpi",
+                        children=[
+                            html.Div("Señales listas", className="kpi-label"),
+                            html.Div(f"{athletes_with_ecg} / {athlete_count}", className="kpi-value"),
+                            html.Div("Base disponible para revisar recuperación y respuesta al esfuerzo.", className="kpi-sub"),
+                            html.Div(className="kpi-ecg-line"),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(
+                className="session-main-grid",
+                children=[
+                    html.Div(
+                        className="session-stack",
+                        children=[
+                            journey_fold(
+                                "Cómo abrir la jornada",
+                                f"{ref_sport or 'Deporte de combate'} | {session_chip}",
+                                [
+                                    html.Ul(
+                                        [
+                                            html.Li([html.Strong("Objetivo principal: "), blueprint["objetivo_principal"]]),
+                                            html.Li([html.Strong("Lo importante hoy: "), blueprint["objetivo_desc"]]),
+                                            html.Li([html.Strong("Estructura sugerida: "), blueprint["estructura"]]),
+                                            html.Li([html.Strong("En qué fijarte primero: "), blueprint["lectura"]]),
+                                        ],
+                                        className="list-compact",
+                                    ),
+                                ],
+                                open_by_default=True,
+                            ),
+                            journey_fold(
+                                "Orden de revisión",
+                                "Primero lecturas recientes y después pendientes del día.",
+                                [
+                                    html.P(
+                                        "Primero entra con quienes ya tienen check-in o señal reciente. Así validas rápido cómo llega el grupo y dónde conviene afinar.",
+                                        className="text-muted",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.Ul(
+                                        [html.Li(name) for name in focus_names] if focus_names else [html.Li("Todavía no hay deportistas con lectura reciente para priorizar.")],
+                                        className="list-compact",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.P(
+                                        "Después conviene revisar a quienes todavía no dejaron contexto del día.",
+                                        className="text-muted",
+                                    ),
+                                    html.Ul(
+                                        [html.Li(name) for name in pending_names] if pending_names else [html.Li("El equipo ya tiene check-in reciente.")],
+                                        className="list-compact",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.Div(
+                                        "También podrías orientar la jornada hacia: "
+                                        + (", ".join(blueprint["objetivos_secundarios"]) if blueprint["objetivos_secundarios"] else "Sin objetivos secundarios definidos."),
+                                        className="text-muted",
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="session-stack",
+                        children=[
+                            journey_fold(
+                                "Qué decidir hoy",
+                                "Mantén visible el criterio del día y abre el detalle solo cuando haga falta.",
+                                [
+                                    html.P(
+                                        "No hace falta abrir todo de golpe. Entra por el contexto, confirma la respuesta del equipo y luego baja al detalle solo si hace falta.",
+                                        className="text-muted",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.Ul(
+                                        [
+                                            html.Li("1. Confirma quién llega con mejor base para el bloque principal."),
+                                            html.Li("2. Revisa señales y recuperación antes de subir intensidad o volumen."),
+                                            html.Li("3. Usa comparativa e histórico solo para respaldar el ajuste final del día."),
+                                        ],
+                                        className="list-compact",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.H4("Recomendaciones del día", className="card-title"),
+                                    html.Ul(
+                                        [
+                                            html.Li([
+                                                html.Strong(f"{item['tipo'].capitalize()}: "),
+                                                item["texto"],
+                                            ])
+                                            for item in recommendations
+                                        ],
+                                        className="list-compact",
+                                    ),
+                                ],
+                            ),
+                            html.Div(
+                                className="card",
+                                children=[
+                                    html.H4("Acciones rápidas", className="card-title"),
+                                    html.P(
+                                        "Estas entradas te ayudan a seguir la jornada sin perderte entre módulos.",
+                                        className="text-muted",
+                                    ),
+                                    html.Div(className="spacer-10"),
+                                    html.Div(
+                                        className="row-wrap-10 session-action-row",
+                                        children=[
+                                            dcc.Link(html.Button("Abrir estado del equipo", className="btn btn-primary"), href="/usuarios"),
+                                            dcc.Link(html.Button("Ir a análisis", className="btn btn-ghost"), href="/ecg"),
+                                            dcc.Link(html.Button("Abrir comparativa", className="btn btn-ghost"), href="/comparar"),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        className="page-content session-shell",
+    )
+
+
 def view_sesion():
     """
     CS-009 — Contexto visible de sesión v1
@@ -2210,10 +2966,10 @@ def view_sesion():
                                             ],
                                         ),
                                         html.Div(
-                                            style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"},
+                                            className="btn-save-row",
                                             children=[
                                                 html.Button("Registrar esfuerzo", id="btn-save-rpe", className="btn btn-primary"),
-                                                html.Div(id="rpe-save-msg", style={"fontSize": "13px"}),
+                                                html.Div(id="rpe-save-msg", className="text-muted"),
                                             ],
                                         ),
                                     ],
@@ -2228,216 +2984,7 @@ def view_sesion():
 
     # ---------- Coach ----------
     if role == "coach":
-        coach_id = uid_int
-        roster = _coach_roster(int(coach_id)) if coach_id else []
-        athlete_count = len(roster)
-        latest_checkins = 0
-        athletes_with_ecg = 0
-        focus_names = []
-
-        for athlete in roster[:]:
-            aid = athlete.get("id")
-            if aid is None:
-                continue
-            try:
-                qrows = db.list_questionnaires(int(aid)) or []
-                if qrows:
-                    latest_checkins += 1
-                    if len(focus_names) < 4:
-                        focus_names.append(athlete.get("name") or "Deportista")
-            except Exception:
-                pass
-            try:
-                if db.get_last_ecg_metrics(int(aid)):
-                    athletes_with_ecg += 1
-            except Exception:
-                pass
-
-        ref_sport = sport or ((roster[0].get("sport") if roster else "") or "")
-        blueprint = _session_blueprint_for_sport(ref_sport, role="coach")
-
-        recommendations = _session_recommendations(blueprint, None, role="coach")
-        session_chip = _session_structure_chip(blueprint["modo"])
-        focus_preview = ", ".join(focus_names[:3]) if focus_names else "Todavía no hay deportistas priorizados con check-in reciente."
-
-        return html.Div(
-            [
-                html.Div(
-                    className="session-hero-grid",
-                    children=[
-                        html.Div(
-                            className="page-head session-hero",
-                            children=[
-                                html.Div(
-                                    className="session-pill-row",
-                                    children=[
-                                        html.Span(ref_sport or "Deporte de combate", className="session-pill"),
-                                        html.Span(session_chip, className="session-pill session-pill--muted"),
-                                    ],
-                                ),
-                                html.H2("Mi sesión"),
-                                html.P(
-                                    "Aquí aterrizas el contexto del día antes de entrar a señales, wellbeing o comparación.",
-                                    className="text-muted",
-                                ),
-                            ],
-                        ),
-                        html.Div(
-                            className="card session-focus-card",
-                            children=[
-                                html.H4("Qué mirar primero", className="card-title"),
-                                html.P(
-                                    "Usa esta vista para decidir a quién revisar antes y con qué contexto arrancar la sesión.",
-                                    className="text-muted",
-                                ),
-                                html.Ul(
-                                    [
-                                        html.Li([html.Strong("Equipo con check-in: "), f"{latest_checkins} de {athlete_count}"]),
-                                        html.Li([html.Strong("Equipo con señal/ECG: "), f"{athletes_with_ecg} de {athlete_count}"]),
-                                        html.Li([html.Strong("Prioridad rápida: "), focus_preview]),
-                                    ],
-                                    className="list-compact",
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="kpis session-kpis",
-                    children=[
-                        html.Div(
-                            className="kpi",
-                            children=[
-                                html.Div("Tipo de sesión guía", className="kpi-label"),
-                                html.Div(blueprint["tipo"], className="kpi-value", style={"fontSize": "22px"}),
-                                html.Div(blueprint["objetivo_desc"], className="kpi-sub"),
-                                html.Div(className="kpi-ecg-line"),
-                            ],
-                        ),
-                        html.Div(
-                            className="kpi",
-                            children=[
-                                html.Div("Equipo con check-in", className="kpi-label"),
-                                html.Div(f"{latest_checkins} / {athlete_count}", className="kpi-value"),
-                                html.Div("Deportistas con estado del día reciente", className="kpi-sub"),
-                                html.Div(className="kpi-ecg-line"),
-                            ],
-                        ),
-                        html.Div(
-                            className="kpi",
-                            children=[
-                                html.Div("Equipo con señal/ECG", className="kpi-label"),
-                                html.Div(f"{athletes_with_ecg} / {athlete_count}", className="kpi-value"),
-                                html.Div("Base disponible para analizar recuperación y carga", className="kpi-sub"),
-                                html.Div(className="kpi-ecg-line"),
-                            ],
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="session-main-grid",
-                    children=[
-                        html.Div(
-                            className="session-stack",
-                            children=[
-                                html.Div(
-                                    className="card",
-                                    children=[
-                                        html.H4("Contexto de la sesión", className="card-title"),
-                                        html.P(
-                                            f"{ref_sport or 'Deporte de combate'} | {session_chip}",
-                                            className="text-muted",
-                                            style={"marginBottom": "10px"},
-                                        ),
-                                        html.Ul(
-                                            [
-                                                html.Li([html.Strong("Objetivo principal: "), blueprint["objetivo_principal"]]),
-                                                html.Li([html.Strong("Qué se busca hoy: "), blueprint["objetivo_desc"]]),
-                                                html.Li([html.Strong("Estructura: "), blueprint["estructura"]]),
-                                                html.Li([html.Strong("Qué mirar para decidir: "), blueprint["lectura"]]),
-                                            ],
-                                            className="list-compact",
-                                        ),
-                                    ],
-                                ),
-                                html.Div(
-                                    className="card",
-                                    children=[
-                                        html.H4(blueprint["detalle_titulo"], className="card-title"),
-                                        html.Div(
-                                            blueprint["nota"],
-                                            className="text-muted",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.Ul(
-                                            [html.Li(item) for item in blueprint["detalle"]],
-                                            className="list-compact",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.Div(
-                                            "También podría entrar hoy: "
-                                            + (", ".join(blueprint["objetivos_secundarios"]) if blueprint["objetivos_secundarios"] else "Sin objetivos secundarios."),
-                                            className="text-muted",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                        html.Div(
-                            className="session-stack",
-                            children=[
-                                html.Div(
-                                    className="card",
-                                    children=[
-                                        html.H4("Flujo recomendado", className="card-title"),
-                                        html.Div(
-                                            "Empieza por quienes ya tienen check-in o señal reciente para abrir una lectura útil más rápido.",
-                                            className="text-muted",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.Ul(
-                                            [html.Li(n) for n in focus_names] if focus_names else [html.Li("Aún no hay check-ins recientes en el equipo.")],
-                                            className="list-compact",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.Ul(
-                                            [
-                                                html.Li("1. Revisa el contexto del día y cómo estará organizada la sesión."),
-                                                html.Li("2. Abre análisis para confirmar esfuerzo y recuperación."),
-                                                html.Li("3. Usa histórico y comparación para decidir si conviene sostener o ajustar la carga."),
-                                            ],
-                                            className="list-compact",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.H4("Recomendaciones del día", className="card-title"),
-                                        html.Ul(
-                                            [
-                                                html.Li([
-                                                    html.Strong(f"{item['tipo'].capitalize()}: "),
-                                                    item["texto"],
-                                                ])
-                                                for item in recommendations
-                                            ],
-                                            className="list-compact",
-                                        ),
-                                        html.Div(className="spacer-10"),
-                                        html.Div(
-                                            className="row-wrap-10 session-action-row",
-                                            children=[
-                                                dcc.Link(html.Button("Ver equipo", className="btn btn-primary"), href="/usuarios"),
-                                                dcc.Link(html.Button("Ir a análisis", className="btn btn-ghost"), href="/ecg"),
-                                                dcc.Link(html.Button("Abrir comparación", className="btn btn-ghost"), href="/comparar"),
-                                            ],
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
-            className="page-content session-shell",
-        )
+        return _coach_jornada_layout_v2(uid_int, sport)
 
     return html.Div(
         [
@@ -2594,8 +3141,6 @@ def home_tiles():
             "Taekwondo": ["Combinaciones 3–4 golpes, foco en distancia.","Pierna: 3×10 patadas controladas por lado.","Condición: 6×30s alta / 60s suave."],
             "Boxeo":     ["Sombra 3×3 min (pies + guardia).","Saco: 4×2 min (jab–cross–hook).","Core: 3×45s planchas + rotaciones."],
             "Box":       ["Sombra 3×3 min (pies + guardia).","Saco: 4×2 min (jab–cross–hook).","Core: 3×45s planchas + rotaciones."],
-            "Judo":      ["Movilidad cadera/hombro 8 min.","Uchi-komi técnico 4×3 min.","Agarres: 6×20s intenso / 40s descanso."],
-            "Kickboxing":["Combinaciones puño–pierna 4×3 min.","Saco: potencia controlada 6×30s.","Respiración 3 min al final."],
         }
         base = ["Calentamiento 8–10 min (movilidad + activación).","Trabajo técnico 20–30 min.","Vuelta a la calma 5 min + estiramientos."]
         sport_key = (sport or "").strip()
@@ -2851,14 +3396,14 @@ def view_peso():
                         style={"marginBottom": "12px"},
                     ),
                     html.Div(id="peso-graph-wrap", children=[
-                        html.Div(className="inner-card", style={"padding": "12px"}, children=[
+                        html.Div(className="inner-card inner-card--chart", children=[
                             dcc.Graph(id="peso-graph", figure=go.Figure(), style={"height": "300px"}),
                         ]),
                     ]),
                     html.Div(
                         id="peso-no-data",
-                        className="inner-card",
-                        style={"display": "none", "padding": "32px", "textAlign": "center"},
+                        className="inner-card data-empty-state",
+                        style={"display": "none"},
                         children=[
                             html.P("Aún no hay registros de peso.", style={"fontWeight": "600", "marginBottom": "6px"}),
                             html.P("Introduce tu primer registro para empezar a ver tu evolución.", className="text-muted"),
@@ -2915,7 +3460,7 @@ def view_peso():
                             style={"width": "100%"},
                         ),
                     ]),
-                    html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px"}, children=[
+                    html.Div(className="btn-save-row", children=[
                         html.Button("Guardar registro", id="btn-save-peso", className="btn btn-primary"),
                         html.Div(id="peso-msg", className="text-danger"),
                     ]),
@@ -3020,7 +3565,7 @@ def save_peso(n, data, date, weight, target, note):
 
 _PESO_GRAPH_HIDDEN = {"display": "none"}
 _PESO_GRAPH_VISIBLE = {}
-_PESO_NODATA_VISIBLE = {"display": "block", "padding": "32px", "textAlign": "center"}
+_PESO_NODATA_VISIBLE = {"display": "block"}
 _PESO_NODATA_HIDDEN = {"display": "none"}
 
 
@@ -3244,14 +3789,14 @@ def view_nutricion():
                         style={"marginBottom": "12px"},
                     ),
                     html.Div(id="nutri-graph-wrap", children=[
-                        html.Div(className="inner-card", style={"padding": "12px"}, children=[
+                        html.Div(className="inner-card inner-card--chart", children=[
                             dcc.Graph(id="nutri-graph", figure=go.Figure(), style={"height": "300px"}),
                         ]),
                     ]),
                     html.Div(
                         id="nutri-no-data",
-                        className="inner-card",
-                        style={"display": "none", "padding": "32px", "textAlign": "center"},
+                        className="inner-card data-empty-state",
+                        style={"display": "none"},
                         children=[
                             html.P("Aún no hay registros de nutrición.", style={"fontWeight": "600", "marginBottom": "6px"}),
                             html.P("Introduce tu primer registro para empezar a ver tu adherencia.", className="text-muted"),
@@ -3313,7 +3858,7 @@ def view_nutricion():
                             style={"width": "100%"},
                         ),
                     ]),
-                    html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px"}, children=[
+                    html.Div(className="btn-save-row", children=[
                         html.Button("Guardar registro", id="btn-save-nutri", className="btn btn-primary"),
                         html.Div(id="nutri-msg", className="text-danger"),
                     ]),
@@ -3418,7 +3963,7 @@ def save_nutricion(n, data, date, adherence, kcal, note):
 
 _NUTRI_GRAPH_HIDDEN  = {"display": "none"}
 _NUTRI_GRAPH_VISIBLE = {}
-_NUTRI_NODATA_VISIBLE = {"display": "block", "padding": "32px", "textAlign": "center"}
+_NUTRI_NODATA_VISIBLE = {"display": "block"}
 _NUTRI_NODATA_HIDDEN  = {"display": "none"}
 
 
@@ -3613,7 +4158,7 @@ def view_invita():
         headline = "Añade deportistas a tu plataforma"
         body = (
             "Comparte este enlace con los atletas que quieras incorporar. "
-            "Al registrarse con tu código quedarán disponibles para añadirlos a tu roster."
+            "Al registrarse con tu código quedarán disponibles para añadirlos a tu plantilla."
         )
     else:
         headline = "Invita a un compañero"
@@ -3680,7 +4225,7 @@ def view_invita():
                 html.Li("La persona crea su cuenta desde la pantalla de registro."),
                 html.Li([
                     "Si eres coach, después " ,
-                    html.Strong("añádela a tu roster"),
+                    html.Strong("añádela a tu plantilla"),
                     " desde la sección Equipo.",
                 ]),
                 html.Li("A partir de ahí ya aparece en cuestionarios, análisis e histórico."),
@@ -3988,6 +4533,8 @@ def save_quick_rpe(n_clicks, rpe, duration):
         open_sess = db.ensure_open_session(uid_int)
         sid = open_sess if isinstance(open_sess, int) else (open_sess.get("id") if open_sess else None)
         db.save_rpe_entry(uid_int, float(rpe), dur, sid)
+        from analysis_engine import invalidate_cache as _inv
+        _inv(uid_int)
         label = "Ligero" if rpe <= 3 else ("Moderado" if rpe <= 6 else ("Exigente" if rpe <= 8 else "Máximo"))
         dur_str = f" · {int(dur)} min" if dur > 0 else ""
         return f"Registrado — RPE {rpe} ({label}){dur_str}. Ya suma a tu carga semanal."
@@ -4017,7 +4564,7 @@ def router(path):
     if path in ("/usuarios", "/legacy"):
         return view_usuarios()
     if path == "/deportista":
-        return view_deportista()
+        return view_deportista_v2()
     if path == "/anuncios":
         return view_anuncios()
     if path == "/contacto":
@@ -4034,6 +4581,8 @@ def router(path):
         return view_sesion()
     if path == "/comparar":
         return compare_view.layout()
+    if path == "/analisis":
+        return analysis_view.layout()
     if path == "/peso":
         return view_peso()
     if path == "/nutricion":
@@ -4074,58 +4623,208 @@ def _open_browser_once(url):
         pass
 
 
+# =============================================================================
+# API REST — Hardware de sensores
+# =============================================================================
+# Estos endpoints permiten que dispositivos físicos (BLE hub, scripts externos,
+# o cualquier hardware con capacidad HTTP) se comuniquen con CombatIQ.
+#
+# Flujo recomendado:
+#   1. Coach empareja el dispositivo desde la UI (/sensores → "Parear dispositivo")
+#      → llama a db.register_device() que crea la fila en sensor_devices
+#   2. Hardware envía POST /api/sensor-ping cada N segundos para indicar que está vivo
+#      → actualiza last_seen y status='connected'
+#   3. Hardware envía POST /api/sensor-data con las lecturas
+#      → guarda en las tablas correspondientes (ecg_metrics, imu_metrics, etc.)
+#   4. La UI de Sensores consulta GET /api/sensor-status/<user_id> para mostrar
+#      el estado de cada dispositivo en tiempo real
+# =============================================================================
+
+from flask import jsonify, request as flask_request
+
+
+@server.route("/api/sensor-ping", methods=["POST"])
+def api_sensor_ping():
+    """
+    Hardware → CombatIQ: heartbeat del sensor.
+
+    Body JSON esperado:
+    {
+        "device_id": "AA:BB:CC:DD:EE:FF",
+        "user_id": 5,
+        "sensor_code": "ECG"          (opcional, solo para info)
+    }
+    """
+    try:
+        data = flask_request.get_json(force=True, silent=True) or {}
+        device_id = str(data.get("device_id", "")).strip()
+        user_id   = int(data.get("user_id", 0))
+        if not device_id or not user_id:
+            return jsonify({"ok": False, "error": "device_id y user_id son obligatorios"}), 400
+        found = db.update_device_last_seen(device_id, user_id)
+        if not found:
+            # Registro automático como fallback (si el dispositivo no estaba emparejado)
+            sensor_code = str(data.get("sensor_code", "UNKNOWN"))
+            db.register_device(user_id, sensor_code, device_id)
+        return jsonify({"ok": True, "found": found}), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@server.route("/api/sensor-data", methods=["POST"])
+def api_sensor_data():
+    """
+    Hardware → CombatIQ: lectura de datos del sensor.
+
+    Body JSON esperado (los campos varían según sensor_code):
+    {
+        "device_id": "AA:BB:CC:DD:EE:FF",
+        "user_id": 5,
+        "sensor_code": "ECG",
+        "session_id": 12,              (opcional)
+        "filename": "ecg_20260414.csv", (opcional, nombre del archivo de origen)
+        "fs": 250,                     (ECG: frecuencia de muestreo)
+        "bpm": 72.5,                   (ECG: frecuencia cardiaca)
+        "sdnn": 45.2,                  (ECG: HRV SDNN)
+        "rmssd": 38.1,                 (ECG: HRV RMSSD)
+        "peaks_count": 186,            (ECG: latidos detectados)
+        "n_hits": 120,                 (IMU: golpes)
+        "hits_per_min": 40.0,          (IMU: ritmo)
+        "mean_int_g": 2.3,             (IMU: intensidad media)
+        "max_int_g": 8.5,              (IMU: pico de impacto)
+        "rms": 0.45,                   (EMG: RMS)
+        "peak": 1.2,                   (EMG: pico)
+        "fatigue": 0.3                 (EMG: índice de fatiga simple)
+    }
+    """
+    try:
+        data = flask_request.get_json(force=True, silent=True) or {}
+        device_id   = str(data.get("device_id", "")).strip()
+        user_id     = int(data.get("user_id", 0))
+        sensor_code = str(data.get("sensor_code", "")).strip().upper()
+        session_id  = data.get("session_id")
+
+        if not user_id or not sensor_code:
+            return jsonify({"ok": False, "error": "user_id y sensor_code son obligatorios"}), 400
+
+        # Actualiza last_seen si tenemos device_id
+        if device_id:
+            db.update_device_last_seen(device_id, user_id)
+
+        filename = str(data.get("filename", f"{sensor_code.lower()}_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"))
+
+        if sensor_code == "ECG":
+            fs  = int(data.get("fs", 250))
+            bpm = data.get("bpm")
+            sdnn  = data.get("sdnn")
+            rmssd = data.get("rmssd")
+            peaks = data.get("peaks_count")
+            if any(v is not None for v in [bpm, sdnn, rmssd, peaks]):
+                ecg_id = db.add_ecg_file(user_id, filename, fs, session_id=session_id)
+                if bpm is not None:
+                    db.save_ecg_metrics_latest(
+                        ecg_id,
+                        float(bpm),
+                        float(sdnn or 0),
+                        float(rmssd or 0),
+                        int(peaks or 0),
+                    )
+
+        elif sensor_code in ("IMU_GLOVE", "IMU_HEAD"):
+            n_hits      = data.get("n_hits")
+            hits_per_min = data.get("hits_per_min")
+            mean_int_g  = data.get("mean_int_g")
+            max_int_g   = data.get("max_int_g")
+            if any(v is not None for v in [n_hits, hits_per_min, mean_int_g, max_int_g]):
+                db.save_imu_metrics(
+                    user_id, filename,
+                    int(n_hits or 0),
+                    float(hits_per_min or 0),
+                    float(mean_int_g or 0),
+                    float(max_int_g or 0),
+                    session_id=session_id,
+                )
+
+        elif sensor_code in ("EMG_ARM", "EMG_LEG"):
+            rms     = data.get("rms")
+            peak    = data.get("peak")
+            fatigue = data.get("fatigue")
+            if any(v is not None for v in [rms, peak, fatigue]):
+                db.save_emg_metrics(
+                    user_id, filename,
+                    float(rms or 0),
+                    float(peak or 0),
+                    float(fatigue or 0),
+                    session_id=session_id,
+                )
+
+        from analysis_engine import invalidate_cache as _inv
+        _inv(user_id)
+        return jsonify({"ok": True, "sensor_code": sensor_code}), 200
+
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@server.route("/api/sensor-status/<int:user_id>", methods=["GET"])
+def api_sensor_status(user_id):
+    """
+    UI → CombatIQ: estado actual de los dispositivos de un usuario.
+    Usado por dcc.Interval en la vista de Sensores para polling ligero.
+
+    Respuesta:
+    {
+        "devices": [
+            {
+                "sensor_code": "ECG",
+                "device_id": "AA:BB:CC:DD:EE:FF",
+                "device_label": "Banda ECG #1",
+                "computed_status": "connected",   // connected|idle|offline|paired
+                "last_seen": "2026-04-14T10:30:00",
+                "firmware_version": "1.2.3"
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        devices = db.get_user_devices(int(user_id))
+        # Sólo devolvemos los campos necesarios para la UI
+        out = [
+            {
+                "sensor_code":      d["sensor_code"],
+                "device_id":        d["device_id"],
+                "device_label":     d.get("device_label") or "",
+                "computed_status":  d.get("computed_status", "paired"),
+                "last_seen":        d.get("last_seen") or "",
+                "firmware_version": d.get("firmware_version") or "",
+            }
+            for d in devices
+        ]
+        return jsonify({"devices": out}), 200
+    except Exception as exc:
+        return jsonify({"devices": [], "error": str(exc)}), 500
+
+
 if __name__ == "__main__":
+    import socket as _socket
     PORT = int(os.environ.get("PORT", 8050))
-    URL = f"http://127.0.0.1:{PORT}/"
+    # HOST: "0.0.0.0" permite que dispositivos de la misma red WiFi se conecten.
+    # Cambia a "127.0.0.1" si solo quieres acceso local (sin hardware externo).
+    HOST = os.environ.get("HOST", "0.0.0.0")
+    URL  = f"http://127.0.0.1:{PORT}/"
+
+    # Imprime la IP local para que el hardware sepa a dónde apuntar
+    try:
+        _local_ip = _socket.gethostbyname(_socket.gethostname())
+        print(f"\n  Abre en este equipo:  http://127.0.0.1:{PORT}/")
+        print(f"  Red local (otros):    http://{_local_ip}:{PORT}/")
+        print(f"  API sensores:         http://{_local_ip}:{PORT}/api/sensor-ping")
+        print(f"                        http://{_local_ip}:{PORT}/api/sensor-data\n")
+    except Exception:
+        print(f"\n  Abre en este equipo:  http://127.0.0.1:{PORT}/\n")
+
     # use_reloader=False evita el WinError 10038 en Python 3.13 + Windows
-    # (bug en select.select con el thread del reloader de Werkzeug)
     if AUTO_OPEN:
         Timer(1.0, lambda: _open_browser_once(URL)).start()
-    app.run(debug=True, port=PORT, use_reloader=False)
-
-
-# =======================
-# Quick actions bar
-# =======================
-class QuickBar:
-    @staticmethod
-    def _chip(label: str, href: str, icon: str, active: bool = False):
-        base = {
-            "display": "inline-flex", "alignItems": "center", "gap": "8px",
-            "padding": "10px 14px", "borderRadius": "12px",
-            "background": "#121722", "border": "1px solid #1f2630",
-            "boxShadow": "0 2px 10px rgba(0,0,0,.25)", "fontWeight": 600
-        }
-        if active:
-            base["border"] = "1px solid #34D7E0"
-        return dcc.Link(
-            html.Span([
-                html.Img(src=f"/assets/icons/{icon}", style={"height": "18px", "opacity": 0.9}),
-                html.Span(label)
-            ]),
-            href=href,
-            style=base,
-            className="quick-chip"
-        )
-
-    @staticmethod
-    def layout(active_path: str = ""):
-        row_style = {"display": "flex", "flexWrap": "wrap",
-                     "gap": "10px", "margin": "0 0 16px 0"}
-        chips = [
-            QuickBar._chip("Señales", "/ecg", "signals.svg", active=active_path == "/ecg"),
-            QuickBar._chip("Bienestar", "/cuestionario", "wellbeing.svg",
-                           active=active_path == "/cuestionario"),
-            QuickBar._chip("Tendencias", "/historico", "history.svg",
-                           active=active_path == "/historico"),
-            QuickBar._chip("Sensores", "/sensores", "sensors.svg",
-                           active=active_path == "/sensores"),
-            QuickBar._chip("Comparar", "/comparar", "compare.svg",
-                           active=active_path == "/comparar"),
-            QuickBar._chip("Peso", "/peso", "weight.svg", active=active_path == "/peso"),
-            QuickBar._chip("Nutrición", "/nutricion", "nutrition.svg",
-                           active=active_path == "/nutricion"),
-            QuickBar._chip("Equipo", "/usuarios", "team.svg",
-                           active=active_path == "/usuarios"),
-        ]
-        return html.Div(chips, style=row_style)
+    app.run(debug=True, host=HOST, port=PORT, use_reloader=False)

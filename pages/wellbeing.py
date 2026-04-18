@@ -1,4 +1,4 @@
-﻿import json
+import json
 from datetime import datetime
 
 import numpy as np
@@ -20,6 +20,7 @@ from flask import session
 
 import db
 import questionnaires as Q
+import analysis_engine as AE
 
 
 def _to_str(v):
@@ -37,9 +38,6 @@ def _safe_int(v):
     except Exception:
         return None
 
-
-def h2(txt):
-    return html.H2(txt, style={"margin": "6px 0 12px"})
 
 
 def _coach_roster(coach_id: int):
@@ -96,6 +94,132 @@ def _athlete_sport(user_id):
         return ""
 
 
+def _today_wellness(athlete_id: int):
+    """Return today's wellness score (float) for an athlete, or None if not yet filled."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        qs = db.list_questionnaires(int(athlete_id)) or []
+        for q in qs:
+            ts = (q.get("ts") or q.get("created_at") or q.get("timestamp") or "")[:10]
+            if ts == today:
+                w = q.get("wellness")
+                return float(w) if w is not None else None
+    except Exception:
+        pass
+    return None
+
+
+def _score_class(score):
+    if score is None:
+        return "checkin-score--pending"
+    if score >= 80:
+        return "checkin-score--ok"
+    if score >= 65:
+        return "checkin-score--good"
+    if score >= 50:
+        return "checkin-score--warn"
+    return "checkin-score--low"
+
+
+def _score_label(score):
+    if score is None:
+        return "Pendiente"
+    if score >= 80:
+        return "Listo"
+    if score >= 65:
+        return "Bien"
+    if score >= 50:
+        return "Atención"
+    return "Bajo"
+
+
+def _render_coach_checkin_overview(coach_id: int):
+    """Builds the team check-in status grid for coaches."""
+    import inspect
+    coach_sport = (_to_str(session.get("sport")) or "").strip() or None
+    athletes = []
+    for fn in ("list_roster_for_coach", "list_my_athletes", "list_athletes_for_coach"):
+        if hasattr(db, fn):
+            try:
+                sig = inspect.signature(getattr(db, fn))
+                if "sport" in sig.parameters:
+                    rows = getattr(db, fn)(int(coach_id), sport=coach_sport) or []
+                else:
+                    rows = getattr(db, fn)(int(coach_id)) or []
+                seen = {a.get("id") for a in athletes}
+                for r in rows:
+                    if not isinstance(r, dict):
+                        continue
+                    rid = r.get("id")
+                    if rid is None or rid in seen:
+                        continue
+                    if coach_sport and r.get("sport") and r["sport"] != coach_sport:
+                        continue
+                    athletes.append(r)
+                if athletes:
+                    break
+            except Exception:
+                pass
+
+    if not athletes:
+        return html.Div(
+            className="card",
+            style={"marginBottom": "16px"},
+            children=[
+                html.H4("Estado del equipo hoy", className="card-title"),
+                html.P("Todavía no tienes deportistas en tu plantilla.", className="text-muted"),
+            ],
+        )
+
+    today = datetime.now().strftime("%d/%m/%Y")
+    items = []
+    filled = 0
+    for a in athletes:
+        aid = a.get("id")
+        name = a.get("name") or "Sin nombre"
+        sport = a.get("sport") or ""
+        initials = "".join(p[0].upper() for p in name.split()[:2]) if name else "?"
+        score = _today_wellness(int(aid)) if aid is not None else None
+        if score is not None:
+            filled += 1
+        score_cls = _score_class(score)
+        score_lbl = _score_label(score)
+        score_num = f"{score:.0f}" if score is not None else "—"
+
+        items.append(html.Div(
+            className="checkin-athlete-card",
+            children=[
+                html.Div(initials, className="checkin-avatar"),
+                html.Div(className="checkin-info", children=[
+                    html.Div(name, className="checkin-name"),
+                    html.Div(sport.title() if sport else "—", className="checkin-sport text-muted"),
+                ]),
+                html.Div(className=f"checkin-score {score_cls}", children=[
+                    html.Span(score_num, className="checkin-score__num"),
+                    html.Span(score_lbl, className="checkin-score__lbl"),
+                ]),
+            ],
+        ))
+
+    pending = len(athletes) - filled
+    summary_color = "var(--neon)" if pending == 0 else ("var(--punch)" if pending > len(athletes) // 2 else "#f0a832")
+
+    return html.Div(
+        className="card",
+        style={"marginBottom": "16px"},
+        children=[
+            html.Div(className="card-title-row", children=[
+                html.H4("Estado del equipo hoy", className="card-title"),
+                html.Span(
+                    f"{filled}/{len(athletes)} completados · {today}",
+                    style={"fontSize": "12px", "color": summary_color, "fontWeight": "600"},
+                ),
+            ]),
+            html.Div(className="checkin-athlete-grid", children=items),
+        ],
+    )
+
+
 def _make_slider(qdef: dict):
     return html.Div(
         className="q-question",
@@ -125,6 +249,10 @@ GROUP_TITLES = {
     "competencia": ("Para competencia", "Preguntas para entender frescura, claridad mental y presión antes de una sesión clave o competencia."),
     "peso": ("Para control del peso", "Preguntas para detectar si el manejo del peso está afectando el rendimiento del día."),
     "molestia": ("Para molestia o lesión", "Preguntas para entender si una molestia actual puede cambiar la sesión o la lectura del día."),
+    # Coach groups
+    "equipo":  ("Observación del equipo", "Cómo ves al grupo hoy — energía, motivación y dinámica."),
+    "alertas": ("Alertas de hoy", "Factores que pueden afectar la calidad o seguridad de la sesión."),
+    "sesion":  ("Sesión planificada", "Qué tienes preparado para el entrenamiento de hoy (contexto, no cuenta en el score)."),
 }
 
 
@@ -135,6 +263,10 @@ _GROUP_COLORS = {
     "competencia": "#e45a5a",
     "peso":        "#27c98f",
     "molestia":    "#7b6fff",
+    # Coach groups
+    "equipo":  "#0ea5e9",
+    "alertas": "#e45a5a",
+    "sesion":  "#27c98f",
 }
 
 
@@ -151,12 +283,15 @@ def _group_header(group_key: str):
     )
 
 
-def _group_block(group_key: str, children):
+def _group_block(group_key: str, children, visible: bool = False, open_default: bool = None):
+    """visible=True skips display:none (for coach groups that are always shown)."""
+    is_open = open_default if open_default is not None else (group_key == "base")
+    style = {} if visible else {"display": "none"}
     return html.Details(
         id=f"group-{group_key}",
         className="collapsible-card q-group-card",
-        style={"display": "none"},
-        open=(group_key == "base"),
+        style=style,
+        open=is_open,
         children=[
             html.Summary(
                 className="collapsible-card__summary",
@@ -171,177 +306,80 @@ def _group_block(group_key: str, children):
 
 
 # =======================
+# Shared helpers (gauge / result)
+# =======================
+
+
+def _build_gauge_fig(wellness: float) -> go.Figure:
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=wellness,
+        domain={"x": [0.0, 1.0], "y": [0.2, 0.98]},
+        gauge={
+            "axis": {"range": [0, 100], "tickcolor": "rgba(150,175,200,0.6)"},
+            "bar": {"color": "#0891b2", "thickness": 0.28},
+            "bgcolor": "rgba(0,0,0,0)",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, 50],  "color": "rgba(200,50,50,0.18)"},
+                {"range": [50, 65], "color": "rgba(220,140,30,0.18)"},
+                {"range": [65, 80], "color": "rgba(200,185,30,0.18)"},
+                {"range": [80, 100],"color": "rgba(30,170,100,0.18)"},
+            ],
+        },
+    ))
+    apply_chart_style(fig, height=320)
+    fig.update_layout(margin=dict(l=18, r=18, t=6, b=6))
+    return fig
+
+
+# =======================
 # Cuestionario (layout)
 # =======================
 
 
-def _layout_questionnaire_legacy():
-    if not session.get("user_id"):
-        return html.Div("Inicia sesión para ver esta página.")
+def _layout_coach_checkin(coach_id: int):
+    """Check-in form for coaches: they observe and rate the team, not themselves."""
+    overview = _render_coach_checkin_overview(coach_id)
 
-    role = _to_str(session.get("role")) or "no autenticado"
-    uid = session.get("user_id")
-
-    team_selector = html.Div([
-        dcc.Dropdown(id="q-team", options=[{"label": "Todos", "value": "ALL"}], value="ALL", style={"display": "none"})
-    ])
-
-    athletes = []
-    options_users = []
-    default_user = None
-
-    if role == "coach" and uid:
-        coach_id = int(uid)
-        teams = []
-        if hasattr(db, "list_teams"):
-            try:
-                teams = db.list_teams(coach_id) or []
-            except Exception:
-                teams = []
-
-        team_options = [{"label": "Todos", "value": "ALL"}] + [
-            {
-                "label": f"{t.get('name', 'Equipo')}" + (f" · {t.get('sport')}" if t.get("sport") else ""),
-                "value": t.get("id"),
-            }
-            for t in teams if t.get("id") is not None
-        ]
-        default_team = team_options[1]["value"] if len(team_options) > 1 else "ALL"
-        team_selector = html.Div([
-            html.Label("Equipo"),
-            dcc.Dropdown(id="q-team", options=team_options, value=default_team, placeholder="Selecciona equipo..."),
-            html.Br(),
-        ])
-
-        athletes = _coach_roster(coach_id)
-        if default_team not in (None, "", "ALL"):
-            member_ids = _team_member_ids(int(default_team))
-            athletes = [a for a in athletes if int(a.get("id")) in member_ids] if member_ids else []
-
-        options_users = [
-            {"label": f"{u.get('name', 'Sin nombre')} · {u.get('sport', '-')}", "value": u.get("id")}
-            for u in athletes if u.get("id") is not None
-        ]
-        default_user = options_users[0]["value"] if options_users else None
-
-    elif role == "deportista" and uid:
-        u = db.get_user_by_id(int(uid))
-        athletes = [u] if u and u.get("role") == "deportista" else []
-        options_users = [
-            {"label": f"{u.get('name', 'Sin nombre')} · {u.get('sport', '-')}", "value": u.get("id")}
-            for u in athletes if u and u.get("id") is not None
-        ]
-        default_user = options_users[0]["value"] if options_users else None
-
-    else:
-        athletes = [u for u in db.list_users() if (u.get("role", "deportista") == "deportista")]
-        options_users = [
-            {"label": f"{u.get('name', 'Sin nombre')} · {u.get('sport', '-')}", "value": u.get("id")}
-            for u in athletes if u.get("id") is not None
-        ]
-        default_user = options_users[0]["value"] if options_users else None
-
-    if role == "deportista":
-        user_selector = html.Div([
-            html.Label("Deportista"),
-            dcc.Dropdown(id="q-user", options=options_users, value=default_user, disabled=True),
-        ])
-    else:
-        user_selector = html.Div([
-            html.Label("Deportista"),
-            dcc.Dropdown(id="q-user", options=options_users, value=default_user, placeholder="Selecciona deportista..."),
-        ])
-
+    defs = Q.coach_question_defs()
+    coach_groups = ["equipo", "alertas", "sesion"]
     question_items = []
-    ordered_groups = ["base", "taekwondo", "boxeo", "competencia", "peso", "molestia"]
-    defs = Q.question_defs()
-    for group_key in ordered_groups:
-        group_questions = [_make_slider(q) for q in defs if q.get("group") == group_key]
-        question_items.append(_group_block(group_key, group_questions))
+    for gk in coach_groups:
+        group_qs = [_make_slider(q) for q in defs if q.get("group") == gk]
+        question_items.append(_group_block(gk, group_qs, visible=True, open_default=(gk != "sesion")))
 
     return html.Div([
-
-        # ── Encabezado ──────────────────────────────────────────────────────
         html.Div(className="page-head", children=[
-            html.H2("Estado competitivo del día"),
+            html.H2("Check-in del equipo"),
             html.P(
-                "Responde este check-in para saber cómo llegas hoy y qué conviene tener en cuenta antes de entrenar o competir.",
+                "Registra tu observación del día sobre el equipo. "
+                "Esta lectura ayuda a planificar la sesión y a detectar patrones en el tiempo.",
                 className="text-muted",
             ),
         ]),
-
-        # ── Card: quién ──────────────────────────────────────────────────────
+        overview,
         html.Div(className="card", style={"marginBottom": "16px"}, children=[
-            html.H4("Deportista", className="card-title"),
-            team_selector,
-            user_selector,
-            html.Div(id="q-sport-chip", className="q-sport-chip"),
+            html.H4("Observación del día", className="card-title"),
+            html.P(
+                "Evalúa lo que observas en el equipo antes de comenzar la sesión.",
+                className="text-muted q-block-copy",
+            ),
+            html.Div(className="q-groups", children=question_items),
+            html.Button(
+                "Guardar check-in del equipo",
+                id="btn-save-q",
+                className="btn btn-primary",
+                style={"marginTop": "18px", "width": "100%"},
+            ),
         ]),
-
-        # ── Card: contexto del día ───────────────────────────────────────────
-        html.Div(className="card", style={"marginBottom": "16px"}, children=[
-            html.H4("Contexto del día", className="card-title"),
-            html.Div(className="filters-bar filters-bar--3", children=[
-                html.Div(className="filter-item", children=[
-                    html.Label("¿Hay competencia importante cerca?"),
-                    dcc.Dropdown(
-                        id="q-competition",
-                        options=[{"label": "No", "value": "no"}, {"label": "Sí", "value": "si"}],
-                        value="no", clearable=False,
-                    ),
-                ]),
-                html.Div(className="filter-item", children=[
-                    html.Label("¿El control del peso hoy importa?"),
-                    dcc.Dropdown(
-                        id="q-weight",
-                        options=[{"label": "No", "value": "no"}, {"label": "Sí", "value": "si"}],
-                        value="no", clearable=False,
-                    ),
-                ]),
-                html.Div(className="filter-item", children=[
-                    html.Label("¿Hay molestia a considerar?"),
-                    dcc.Dropdown(
-                        id="q-injury",
-                        options=[{"label": "No", "value": "no"}, {"label": "Sí", "value": "si"}],
-                        value="no", clearable=False,
-                    ),
-                ]),
-            ]),
-            html.Div(style={"marginTop": "14px"}, children=[
-                html.Label("Asociar a sesión"),
-                dcc.Dropdown(
-                    id="q-session",
-                    options=[
-                        {"label": "Auto (sesión abierta / crear si no existe)", "value": "AUTO"},
-                        {"label": "Sin sesión (general)", "value": "NONE"},
-                    ],
-                    value="AUTO", clearable=False,
-                ),
-                html.Small(
-                    "Tip: si creas una sesión en Señales, puedes ligar el cuestionario para comparaciones por sesión.",
-                    className="text-muted",
-                ),
-            ]),
-        ]),
-
-        # ── Card: preguntas ──────────────────────────────────────────────────
-        html.Div(className="card", style={"marginBottom": "20px"}, children=[
-            html.H4("Preguntas del día", className="card-title"),
-            html.Div(children=question_items),
-        ]),
-
-        # ── Guardar ──────────────────────────────────────────────────────────
-        html.Button("Guardar cuestionario", id="btn-save-q", className="btn btn-primary",
-                    style={"marginBottom": "20px", "width": "100%"}),
-
-        # ── Resultado ───────────────────────────────────────────────────────
-        html.Div(className="inner-card", style={"borderRadius": "14px", "padding": "8px 12px 16px"}, children=[
-            html.H4("Resultado del día", className="card-title", style={"padding": "8px 4px 0"}),
+        html.Div(className="inner-card q-result-card", children=[
+            html.H4("Lectura del equipo hoy", className="card-title"),
+            html.Div("Preparación del equipo (0-100)", className="text-muted q-result-subtitle"),
             dcc.Graph(id="q-gauge", figure=go.Figure(), config=graph_config(),
-                      style={"height": "360px", "width": "100%"}),
-            html.Div(id="q-explain", style={"padding": "0 8px 8px"}),
+                      style={"height": "300px", "width": "100%"}),
+            html.Div(id="q-explain", className="q-result-explain"),
         ]),
-
     ])
 
 
@@ -352,6 +390,10 @@ def layout_questionnaire():
     role = _to_str(session.get("role")) or "no autenticado"
     uid = session.get("user_id")
 
+    # Coaches get their own team-observation check-in, not the athlete self-assessment
+    if role == "coach" and uid:
+        return _layout_coach_checkin(int(uid))
+
     team_selector = html.Div([
         dcc.Dropdown(id="q-team", options=[{"label": "Todos", "value": "ALL"}], value="ALL", style={"display": "none"})
     ])
@@ -360,41 +402,7 @@ def layout_questionnaire():
     options_users = []
     default_user = None
 
-    if role == "coach" and uid:
-        coach_id = int(uid)
-        teams = []
-        if hasattr(db, "list_teams"):
-            try:
-                teams = db.list_teams(coach_id) or []
-            except Exception:
-                teams = []
-
-        team_options = [{"label": "Todos", "value": "ALL"}] + [
-            {
-                "label": f"{t.get('name', 'Equipo')}" + (f" · {t.get('sport')}" if t.get("sport") else ""),
-                "value": t.get("id"),
-            }
-            for t in teams if t.get("id") is not None
-        ]
-        default_team = team_options[1]["value"] if len(team_options) > 1 else "ALL"
-        team_selector = html.Div([
-            html.Label("Equipo"),
-            dcc.Dropdown(id="q-team", options=team_options, value=default_team, placeholder="Selecciona equipo..."),
-            html.Br(),
-        ])
-
-        athletes = _coach_roster(coach_id)
-        if default_team not in (None, "", "ALL"):
-            member_ids = _team_member_ids(int(default_team))
-            athletes = [a for a in athletes if int(a.get("id")) in member_ids] if member_ids else []
-
-        options_users = [
-            {"label": f"{u.get('name', 'Sin nombre')} · {u.get('sport', '-')}", "value": u.get("id")}
-            for u in athletes if u.get("id") is not None
-        ]
-        default_user = options_users[0]["value"] if options_users else None
-
-    elif role == "deportista" and uid:
+    if role == "deportista" and uid:
         u = db.get_user_by_id(int(uid))
         athletes = [u] if u and u.get("role") == "deportista" else []
         options_users = [
@@ -478,11 +486,11 @@ def layout_questionnaire():
                         ),
                     ]),
                 ]),
-                html.Div(className="inner-card q-result-card", style={"borderRadius": "14px", "padding": "8px 12px 16px"}, children=[
-                    html.H4("Resultado del día", className="card-title", style={"padding": "8px 4px 0"}),
-                    html.Div("Estado competitivo del día (0-100)", className="text-muted", style={"padding": "0 8px 4px"}),
+                html.Div(className="inner-card q-result-card", children=[
+                    html.H4("Resultado del día", className="card-title"),
+                    html.Div("Estado competitivo del día (0-100)", className="text-muted q-result-subtitle"),
                     dcc.Graph(id="q-gauge", figure=go.Figure(), config=graph_config(), style={"height": "300px", "width": "100%"}),
-                    html.Div(id="q-explain", style={"padding": "10px 8px 8px"}),
+                    html.Div(id="q-explain", className="q-result-explain"),
                 ]),
             ]),
             html.Div(className="panel-col", children=[
@@ -607,6 +615,8 @@ def load_q_sessions(user_id):
     prevent_initial_call=True,
 )
 def save_q(n, user_id, session_id, competition, weight, injury, *values):
+    if _to_str(session.get("role")) == "coach":
+        raise PreventUpdate
     if not user_id:
         raise PreventUpdate
 
@@ -654,6 +664,7 @@ def save_q(n, user_id, session_id, competition, weight, injury, *values):
         None,
         session_id=sid,
     )
+    AE.invalidate_cache(int(user_id))
 
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -702,6 +713,78 @@ def save_q(n, user_id, session_id, competition, weight, injury, *values):
             html.Li(f"Señales de riesgo: {breakdown['risk_avg']:.0f}/100"),
             html.Li(f"Lo mejor de hoy: {positives_txt}."),
             html.Li(f"Lo que más pesa en contra hoy: {risks_txt}."),
+        ]),
+    ])
+    return fig, explain
+
+
+@callback(
+    Output("q-gauge", "figure", allow_duplicate=True),
+    Output("q-explain", "children", allow_duplicate=True),
+    Input("btn-save-q", "n_clicks"),
+    *[State(f"q-{k}", "value") for k, _ in Q.coach_questions()],
+    prevent_initial_call=True,
+)
+def save_coach_q(n, *values):
+    if _to_str(session.get("role")) != "coach":
+        raise PreventUpdate
+
+    coach_id = _safe_int(session.get("user_id"))
+    if not coach_id:
+        raise PreventUpdate
+
+    ans = {}
+    for (k, _), v in zip(Q.coach_questions(), values):
+        meta = Q.question_meta(k)
+        ans[k] = meta.get("default", 3) if v is None else v
+
+    breakdown = Q.coach_score_breakdown(ans)
+    score = breakdown["score"]
+
+    db.save_questionnaire(
+        coach_id,
+        ans,
+        score,
+        None,
+        None,
+        session_id=None,
+    )
+    AE.invalidate_cache(coach_id)
+
+    fig = _build_gauge_fig(score)
+
+    if score >= 80:
+        estado = "El equipo llega en muy buen estado — sesión exigente viable"
+    elif score >= 65:
+        estado = "Buen estado general del equipo, con algún punto a vigilar"
+    elif score >= 50:
+        estado = "Equipo con señales de fatiga — ajustar la carga planificada"
+    else:
+        estado = "Equipo comprometido hoy — priorizar recuperación y técnica suave"
+
+    top_positive = sorted(
+        [d for d in breakdown["details"] if d["dimension"] == "positive"],
+        key=lambda x: x["score"], reverse=True
+    )[:2]
+    top_risks = sorted(
+        [d for d in breakdown["details"] if d["dimension"] == "risk"],
+        key=lambda x: x["score"], reverse=True
+    )[:2]
+
+    pos_txt  = ", ".join(d["label"].replace("¿", "").replace("?", "") for d in top_positive) or "—"
+    risk_txt = ", ".join(d["label"].replace("¿", "").replace("?", "") for d in top_risks) or "—"
+
+    explain = html.Div([
+        html.P([html.Strong("Lectura del equipo: "), estado]),
+        html.P(
+            "Este valor combina el 65% de indicadores positivos (energía, motivación, dinámica) "
+            "con el 35% de alertas (carga acumulada, molestias del equipo)."
+        ),
+        html.Ul([
+            html.Li(f"Indicadores positivos: {breakdown['positive_avg']:.0f}/100"),
+            html.Li(f"Alertas del equipo: {breakdown['risk_avg']:.0f}/100"),
+            html.Li(f"Puntos fuertes hoy: {pos_txt}."),
+            html.Li(f"Lo más a vigilar hoy: {risk_txt}."),
         ]),
     ])
     return fig, explain
@@ -829,9 +912,24 @@ def _parse_answers_json(raw):
 
 
 def _history_athletes_for_role(role, uid, team_id="ALL"):
+    import inspect
     athletes = []
     if role == "coach" and uid:
-        athletes = _coach_roster(int(uid))
+        coach_sport = (_to_str(session.get("sport")) or "").strip() or None
+        for fn in ("list_roster_for_coach", "list_my_athletes", "list_athletes_for_coach"):
+            if hasattr(db, fn):
+                try:
+                    sig = inspect.signature(getattr(db, fn))
+                    if "sport" in sig.parameters:
+                        athletes = getattr(db, fn)(int(uid), sport=coach_sport) or []
+                    else:
+                        athletes = getattr(db, fn)(int(uid)) or []
+                    if athletes:
+                        break
+                except Exception:
+                    pass
+        if coach_sport:
+            athletes = [a for a in athletes if not a.get("sport") or a["sport"] == coach_sport]
         if team_id not in (None, "", "ALL"):
             member_ids = _team_member_ids(int(team_id))
             athletes = [a for a in athletes if int(a.get("id")) in member_ids] if member_ids else []
@@ -904,19 +1002,23 @@ def layout_history():
 
     options_users = _history_options(role, uid, default_team if role == "coach" and uid else "ALL")
 
+    if role == "coach":
+        hist_title = "Histórico del equipo"
+        hist_sub = "Selecciona un deportista para ver cómo ha evolucionado su estado a lo largo del tiempo."
+    else:
+        hist_title = "Histórico de wellbeing"
+        hist_sub = "Aquí puedes ver cómo ha ido cambiando el estado del día y qué señales merece la pena revisar con más calma."
+
     return html.Div([
 
         # ── Encabezado ──────────────────────────────────────────────────────
         html.Div(className="page-head", children=[
-            html.H2("Histórico de wellbeing"),
-            html.P(
-                "Aquí puedes ver cómo ha ido cambiando el estado del día y qué señales merece la pena revisar con más calma.",
-                className="text-muted",
-            ),
+            html.H2(hist_title),
+            html.P(hist_sub, className="text-muted"),
         ]),
 
         # ── Card: selector ───────────────────────────────────────────────────
-        html.Div(className="card", style={"marginBottom": "20px"}, children=[
+        html.Div(className="card", children=[
             html.H4("Qué deportista quieres revisar", className="card-title"),
             team_selector,
             html.Div(className="filter-item", style={"marginTop": "8px"}, children=[
@@ -934,18 +1036,18 @@ def layout_history():
             ),
         ]),
 
-        html.Div(id="h-summary", className="kpis kpis--auto kpis--tight", style={"marginBottom": "16px"}),
+        html.Div(id="h-summary", className="kpis kpis--auto kpis--tight wellbeing-history-kpis"),
 
         # ── Gráficas ─────────────────────────────────────────────────────────
         html.Div(className="wellbeing-history-grid", children=[
-            html.Div(className="inner-card", style={"borderRadius": "14px", "padding": "8px 12px 12px"}, children=[
-                html.H4("Estado del día", className="card-title", style={"padding": "8px 4px 0"}),
+            html.Div(className="inner-card", children=[
+                html.H4("Estado del día", className="card-title"),
                 dcc.Graph(id="h-wellness", figure=go.Figure(), config=graph_config(),
                           style={"height": "380px", "width": "100%"}),
             ]),
 
-            html.Div(className="inner-card", style={"borderRadius": "14px", "padding": "8px 12px 12px"}, children=[
-                html.H4("Carga y señales del contexto", className="card-title", style={"padding": "8px 4px 0"}),
+            html.Div(className="inner-card", children=[
+                html.H4("Carga y señales del contexto", className="card-title"),
                 dcc.Graph(id="h-load", figure=go.Figure(), config=graph_config(),
                           style={"height": "380px", "width": "100%"}),
                 html.Details(className="collapsible-card wellbeing-help", children=[

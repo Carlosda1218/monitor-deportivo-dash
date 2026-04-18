@@ -81,10 +81,9 @@ def kpi_card(label, value, suffix=""):
 def analysis_section(title, subtitle, inner, accent=None, class_name=""):
     return html.Div(
         className=f"card analysis-section-card {class_name}".strip(),
-        style={"marginTop": "14px"},
         children=[
             html.H4(title, className="card-title"),
-            html.P(subtitle, className="text-muted", style={"marginBottom": "12px"}),
+            html.P(subtitle, className="text-muted"),
             inner,
         ],
     )
@@ -1225,7 +1224,8 @@ class SignalsView:
         uid = session.get("user_id")
 
         if role == "coach" and uid:
-            athletes = self.db.list_athletes_for_coach(int(uid))
+            coach_sport = str(session.get("sport") or "").strip() or None
+            athletes = self.db.list_athletes_for_coach(int(uid), sport=coach_sport)
         elif role == "deportista" and uid:
             u = self.db.get_user_by_id(int(uid))
             athletes = [u] if u and u.get("role") == "deportista" else []
@@ -1259,47 +1259,79 @@ class SignalsView:
             else:
                 sensors_text = "Sin sensores asignados aún."
 
+        # ── Selector de deportista — visible para coach, oculto para atleta ──
         if role == "deportista":
-            user_selector = html.Div([
-                html.Label("Deportista"),
-                dcc.Dropdown(
-                    id="ecg-user",
-                    options=options_users,
-                    value=default_user,
-                    disabled=True,
-                )
-            ])
+            # El ID debe existir para los callbacks; lo ocultamos visualmente
+            user_selector = html.Div(
+                style={"display": "none"},
+                children=[dcc.Dropdown(id="ecg-user", options=options_users, value=default_user)]
+            )
         else:
-            user_selector = html.Div([
-                html.Label("Deportista"),
+            user_selector = html.Div(className="filter-item", children=[
+                html.Label("Deportista del equipo"),
                 dcc.Dropdown(
                     id="ecg-user",
                     options=options_users,
-                    placeholder="Selecciona deportista..."
+                    placeholder="Selecciona deportista...",
                 )
             ])
 
+        # ── Textos que cambian por rol ──────────────────────────────────────
+        if role == "deportista":
+            page_title    = "Mis lecturas"
+            page_sub      = "Revisa tu ECG, movimiento y esfuerzo de las últimas sesiones."
+            flow_subtitle = "Selecciona tu sesión activa y revisa qué dicen las señales."
+            flow_pills    = [
+                html.Span("1. Tu sesión", className="pill"),
+                html.Span("2. Contexto", className="pill"),
+                html.Span("3. Lectura", className="pill"),
+            ]
+            before_analyze_sub = "Confirma qué lectura tienes disponible hoy antes de abrir los gráficos."
+            focus_title = "Cómo entrar hoy"
+            focus_sub = "Empieza por tu sesión activa y baja al detalle solo cuando ya tengas claro qué quieres revisar."
+            focus_points = [
+                "Confirma tu sesión del día antes de abrir las señales.",
+                "Mira primero si tienes base de recuperación y movimiento cargada.",
+                "Entra a ECG o IMU cuando quieras validar cómo respondió tu cuerpo.",
+            ]
+            session_config_sub = "Ábrelo solo si necesitas ajustar tipo de trabajo, objetivo o estructura antes de guardar la sesión."
+            session_config_open = True
+            ecg_entry_sub = "Aquí puedes cargar o revisar tu lectura cardiovascular del día para entender esfuerzo y recuperación."
+            ecg_download_sub = "Descarga la señal completa o un informe breve si quieres guardar la lectura con una explicación clara."
+            imu_entry_sub = "Revisa tu movimiento con una lectura más clara de ritmo, acciones y respuesta durante la sesión."
+            imu_download_sub = "Guarda los datos o un informe breve cuando quieras compartir la lectura o dejar registro."
+        else:
+            page_title    = "Análisis del equipo"
+            page_sub      = "Selecciona un deportista de tu plantilla y revisa sus lecturas de señales."
+            flow_subtitle = "Elige al deportista, confirma la sesión del día y revisa qué dicen las señales."
+            flow_pills    = [
+                html.Span("1. Deportista", className="pill"),
+                html.Span("2. Sesión", className="pill"),
+                html.Span("3. Contexto", className="pill"),
+                html.Span("4. Lectura", className="pill"),
+            ]
+            before_analyze_sub = "Elige al deportista y confirma qué lectura tienes disponible hoy antes de abrir los gráficos."
+            focus_title = "Qué revisar primero"
+            focus_sub = "La idea es entrar con contexto y no abrir toda la pantalla de golpe. Primero confirma a quién estás leyendo y luego decide dónde profundizar."
+            focus_points = [
+                "Selecciona al deportista y confirma la sesión que vas a revisar.",
+                "Comprueba si ya tienes base útil de recuperación o movimiento cargada.",
+                "Entra a ECG o IMU solo cuando ya sepas qué señal te ayudará a decidir mejor.",
+            ]
+            session_config_sub = "Ábrelo solo si necesitas ajustar el contexto de trabajo antes de guardar o continuar la lectura."
+            session_config_open = False
+            ecg_entry_sub = "Trabaja sobre la lectura cardiovascular del deportista seleccionado para revisar carga y recuperación con más contexto."
+            ecg_download_sub = "Si necesitas respaldar la lectura, aquí puedes bajar los datos o un informe breve con la gráfica explicada."
+            imu_entry_sub = "Esta vista te ayuda a revisar ritmo, acciones y respuesta del movimiento del deportista seleccionado."
+            imu_download_sub = "Usa estas descargas cuando quieras compartir la lectura o guardar un respaldo útil para el seguimiento."
+
         # ✅ Sesión activa (más protagonista en el flujo)
         session_block = html.Div(
-            className="card",
-            style={"marginTop": "0", "marginBottom": "0", "padding": "16px"},
+            className="card card--session",
             children=[
                 html.H4("Flujo de sesión", className="card-title"),
-                html.P(
-                    "Empieza por el deportista, deja clara la sesión del día y luego revisa qué dicen las señales.",
-                    className="text-muted",
-                    style={"marginBottom": "12px"},
-                ),
-                html.Div(
-                    className="pill-row",
-                    style={"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginBottom": "12px"},
-                    children=[
-                        html.Span("1. Deportista", className="pill"),
-                        html.Span("2. Sesión", className="pill"),
-                        html.Span("3. Contexto", className="pill"),
-                        html.Span("4. Lectura del día", className="pill"),
-                    ],
-                ),
+                html.P(flow_subtitle, className="text-muted"),
+                html.Div(className="session-pill-row", children=flow_pills),
                 html.Label("Sesión del día"),
                 dcc.Dropdown(
                     id="signals-session",
@@ -1308,8 +1340,8 @@ class SignalsView:
                     clearable=True,
                 ),
                 analysis_fold(
-                    "Configurar la sesión",
-                    "Abre este bloque cuando necesites ajustar tipo de trabajo, objetivo o estructura.",
+                    "Ajustar contexto de la sesión",
+                    session_config_sub,
                     [
                         html.Div(className="filters-bar filters-bar--3", children=[
                             html.Div(className="filter-item", children=[
@@ -1358,7 +1390,7 @@ class SignalsView:
                                 ),
                             ]),
                         ]),
-                        html.Div(className="filters-bar filters-bar--3", style={"marginTop": "10px"}, children=[
+                        html.Div(className="filters-bar filters-bar--3", children=[
                             html.Div(className="filter-item", children=[
                                 html.Label("Rounds"),
                                 dcc.Input(id="session-rounds", type="number", min=1, step=1, value=3, debounce=True),
@@ -1372,21 +1404,21 @@ class SignalsView:
                                 dcc.Input(id="session-rest-sec", type="number", min=0, step=15, value=60, debounce=True),
                             ]),
                         ]),
-                        html.Div(className="analysis-action-row", style={"marginTop": "12px"}, children=[
+                        html.Div(className="analysis-action-row", children=[
                             html.Button("Nueva sesión", id="btn-new-session", className="btn btn-primary"),
                             html.Button("Cerrar sesión", id="btn-close-session", className="btn btn-ghost"),
                         ]),
                     ],
-                    open=True,
+                    open=session_config_open,
                 ),
-                html.Div(id="session-msg", style={"marginTop": "8px"}, className="text-danger"),
+                html.Div(id="session-msg", className="text-danger form-msg"),
             ],
         )
 
         # ----- ECG -----
         ecg_block = html.Div(className="grid-2col", children=[
             html.Div(className="stack-8", children=[
-                html.Small("Sólo deportistas pueden tener ficheros ECG.", style={"opacity": 0.8}),
+                html.P(ecg_entry_sub, className="text-muted"),
                 html.Label("Subir archivo ECG (.csv)"),
                 dcc.Upload(
                     id="ecg-upload",
@@ -1394,8 +1426,7 @@ class SignalsView:
                     multiple=False,
                     className="upload-zone",
                 ),
-                html.Button("Cargar ECG de ejemplo", id="btn-ecg-demo",
-                            style={"marginTop": "10px"}, className="btn btn-ghost"),
+                html.Button("Cargar ECG de ejemplo", id="btn-ecg-demo", className="btn btn-ghost btn-demo"),
                 html.Label("Ficheros ECG del usuario"),
                 dcc.Dropdown(id="ecg-file", placeholder="No hay archivos aún..."),
                 analysis_fold(
@@ -1473,38 +1504,45 @@ class SignalsView:
                     ],
                     open=False,
                 ),
-                html.Div(className="export-actions", children=[
-                    html.Button("Descargar PNG", id="btn-dl-png", className="btn btn-primary"),
-                    html.Button("Descargar datos (CSV)", id="btn-dl-peaks", className="btn btn-ghost"),
-                    html.Button("Descargar informe (PDF)", id="btn-dl-ecg-report", className="btn btn-ghost"),
-                ]),
-                html.Small(
-                    "Puedes bajar la señal completa o un informe breve con la gráfica explicada. Si la imagen falla, instala kaleido.",
-                    className="text-muted"
+                analysis_fold(
+                    "Descargas útiles",
+                    ecg_download_sub,
+                    [
+                        html.Div(className="export-actions", children=[
+                            html.Button("Descargar PNG", id="btn-dl-png", className="btn btn-primary"),
+                            html.Button("Descargar datos (CSV)", id="btn-dl-peaks", className="btn btn-ghost"),
+                            html.Button("Descargar informe (PDF)", id="btn-dl-ecg-report", className="btn btn-ghost"),
+                        ]),
+                        html.Small(
+                            "Si la imagen no sale, revisa que kaleido esté disponible en tu entorno.",
+                            className="text-muted"
+                        ),
+                        html.Div(id="ecg-export-msg", className="export-status"),
+                    ],
+                    open=False,
                 ),
-                html.Div(id="ecg-export-msg", className="export-status"),
-                html.Div(id="ecg-msg", style={"marginTop": "8px"}, className="text-danger")
+                html.Div(id="ecg-msg", className="text-danger form-msg")
             ]),
             html.Div(children=[
                 html.Div(id="ecg-kpis", className="kpis"),
                 html.Div(className="ecg-divider"),
-                dcc.Graph(id="ecg-graph", figure=go.Figure(), config=graph_config(), style={"height": "420px", "width": "100%"})
+                dcc.Graph(id="ecg-graph", figure=go.Figure(), config=graph_config(), className="signal-graph")
             ])
         ])
 
         # ----- IMU -----
         imu_block = html.Div(
-            className="grid-2col",
-            style={"marginTop": "16px"},
+            className="grid-2col grid-2col--signal",
             children=[
                 html.Div(className="stack-8", children=[
                     html.Label("Lectura IMU del deporte"),
-                    html.Div(id="imu-sport-banner", className="muted", style={"marginBottom": "8px", "opacity": 0.85}, children=imu_profile["headline"]),
+                    html.Div(id="imu-sport-banner", className="muted sport-banner", children=imu_profile["headline"]),
+                    html.P(imu_entry_sub, className="text-muted"),
                     dcc.Tabs(
                         id="imu-tabs",
                         value=(imu_profile["tabs"][0]["value"] if imu_profile["tabs"] else "imu-arm"),
                         children=[dcc.Tab(label=tab["label"], value=tab["value"]) for tab in imu_profile["tabs"]],
-                        style={"marginBottom": "8px"},
+                        className="signal-tabs",
                     ),
 
                     html.Label("Archivo IMU (.csv)"),
@@ -1518,7 +1556,7 @@ class SignalsView:
                         html.Button("Analizar archivo", id="btn-imu-analyze", className="btn btn-primary"),
                         html.Button("Cargar IMU de ejemplo", id="btn-imu-demo", className="btn btn-ghost"),
                     ]),
-                    html.Div(id="imu-msg", style={"marginTop": "8px"}, className="text-danger"),
+                    html.Div(id="imu-msg", className="text-danger form-msg"),
                     analysis_fold(
                         "Ajustes de visualización",
                         "Úsalo solo si quieres cambiar la ventana visible o afinar cómo se muestra la lectura.",
@@ -1576,35 +1614,35 @@ class SignalsView:
                             html.P(
                                 id="imu-format-help",
                                 children=imu_profile["format_help"],
-                                className="muted",
-                                style={"fontSize": "13px", "opacity": 0.7},
+                                className="muted text-hint",
                             ),
                         ],
                         open=False,
                     ),
-                    html.Div(className="export-actions", children=[
-                        html.Button("Descargar datos (CSV)", id="btn-dl-imu-data", className="btn btn-primary"),
-                        html.Button("Descargar informe (PDF)", id="btn-dl-imu-report", className="btn btn-ghost"),
-                    ]),
-                    html.Small(
-                        "Descarga la lectura de movimiento o un informe breve con explicación clara de la gráfica.",
-                        className="text-muted"
+                    analysis_fold(
+                        "Descargas útiles",
+                        imu_download_sub,
+                        [
+                            html.Div(className="export-actions", children=[
+                                html.Button("Descargar datos (CSV)", id="btn-dl-imu-data", className="btn btn-primary"),
+                                html.Button("Descargar informe (PDF)", id="btn-dl-imu-report", className="btn btn-ghost"),
+                            ]),
+                            html.Div(id="imu-export-msg", className="export-status"),
+                        ],
+                        open=False,
                     ),
-                    html.Div(id="imu-export-msg", className="export-status"),
                 ]),
                 html.Div(children=[
                     html.Div(id="imu-kpis", className="kpis"),
                     html.Div(className="ecg-divider"),
-                    dcc.Graph(id="imu-graph", figure=go.Figure(), config=graph_config(), style={"height": "420px", "width": "100%"}),
+                    dcc.Graph(id="imu-graph", figure=go.Figure(), config=graph_config(), className="signal-graph"),
                 ]),
             ],
         )
 
         # ----- EMG -----
         emg_block = html.Div(
-            className="grid-2col",
-            style={"marginTop": "16px",
-            },
+            className="grid-2col grid-2col--signal",
             children=[
                 html.Div(children=[
                     html.Label("Canal EMG"),
@@ -1615,7 +1653,7 @@ class SignalsView:
                             dcc.Tab(label="EMG brazo", value="emg-arm"),
                             dcc.Tab(label="EMG pierna", value="emg-leg"),
                         ],
-                        style={"marginBottom": "8px"},
+                        className="signal-tabs",
                     ),
 
                     html.Label("Archivo EMG (.csv)"),
@@ -1638,7 +1676,7 @@ class SignalsView:
                     ),
                     html.Br(),
                     html.Button("Analizar EMG", id="btn-emg-analyze", className="btn btn-primary"),
-                    html.Div(id="emg-msg", style={"marginTop": "8px"}, className="text-danger"),
+                    html.Div(id="emg-msg", className="text-danger form-msg"),
                     html.Div(className="filters-bar filters-bar--2", children=[
                         html.Div(className="filter-item", children=[
                             html.Label("Ventana (s)"),
@@ -1699,22 +1737,20 @@ class SignalsView:
                             ". La lógica es la misma para brazo y pierna, pero ",
                             "la interpretación cambia (brazo: golpes / guardia, pierna: patadas / desplazamientos).",
                         ],
-                        className="muted",
-                        style={"fontSize": "13px", "opacity": 0.7},
+                        className="muted text-hint",
                     ),
                 ]),
                 html.Div(children=[
                     html.Div(id="emg-kpis", className="kpis"),
                     html.Div(className="ecg-divider"),
-                    dcc.Graph(id="emg-graph", figure=go.Figure(), config=graph_config(), style={"height": "420px", "width": "100%"}),
+                    dcc.Graph(id="emg-graph", figure=go.Figure(), config=graph_config(), className="signal-graph"),
                 ]),
             ],
         )
 
         # ----- RESP -----
         resp_block = html.Div(
-            className="grid-2col",
-            style={"marginTop": "16px"},
+            className="grid-2col grid-2col--signal",
             children=[
             html.Div(children=[
                 html.Label("Archivo respiración (.csv)"),
@@ -1788,26 +1824,25 @@ class SignalsView:
                 ]),
 
                 html.Button("Analizar respiración", id="btn-resp-analyze", className="btn btn-primary"),
-                html.Div(id="resp-msg", style={"marginTop": "8px"}, className="text-danger"),
+                html.Div(id="resp-msg", className="text-danger form-msg"),
                 html.Br(),
                 html.P(
                     "Formato recomendado: 'time,resp' con la banda torácica en unidades arbitrarias.",
-                    className="muted",
-                    style={"fontSize": "13px", "opacity": 0.7}
+                    className="muted text-hint",
                 ),
             ]),
             html.Div(children=[
                 html.Div(id="resp-kpis", className="kpis"),
                 html.Div(className="ecg-divider"),
-                dcc.Graph(id="resp-graph", figure=go.Figure(), config=graph_config(), style={"height": "420px", "width": "100%"})
+                dcc.Graph(id="resp-graph", figure=go.Figure(), config=graph_config(), className="signal-graph")
             ])
         ])
 
         # ✅ wrappers para bloquear interacción SIN romper callbacks
         def _wrap(lock_msg_id: str, lock_wrap_id: str, inner):
             return html.Div([
-                html.Div(id=lock_msg_id, style={"marginBottom": "8px"}, className="text-danger"),
-                html.Div(id=lock_wrap_id, children=[inner], style={}),
+                html.Div(id=lock_msg_id, className="text-danger form-msg--below"),
+                html.Div(id=lock_wrap_id, children=[inner]),
             ])
 
         return html.Div(className="analysis-shell", children=[
@@ -1822,15 +1857,23 @@ class SignalsView:
             dcc.Store(id="emg-meta", data=None),
             dcc.Store(id="resp-meta", data=None),
 
-            html.Div(className="page-head", children=[
-                html.H2("Análisis de sesión"),
-                html.P(
-                    "Define primero la sesión del día y luego revisa cómo se movió el deportista y cómo respondió a la carga.",
-                    className="text-muted",
-                ),
+            html.Div(className="profile-hero-grid", children=[
+                html.Div(className="page-head", children=[
+                    html.H2(page_title),
+                    html.P(page_sub, className="text-muted"),
+                ]),
+                html.Div(className="card analysis-surface-card profile-focus-card analysis-focus-card", children=[
+                    html.Div("Entrada clara", className="analysis-mini-label"),
+                    html.H4(focus_title, className="card-title"),
+                    html.P(focus_sub, className="text-muted"),
+                    html.Ul(
+                        className="analysis-focus-list",
+                        children=[html.Li(point) for point in focus_points],
+                    ),
+                ]),
             ]),
 
-            html.Div(className="ecg-divider", style={"marginBottom": "16px"}),
+            html.Div(className="ecg-divider ecg-divider--spaced"),
             dcc.Tabs(
                 id="analysis-main-tabs",
                 value="analysis-flow",
@@ -1861,16 +1904,12 @@ class SignalsView:
                 html.Div(className="analysis-top-grid", children=[
                     html.Div(className="card analysis-summary-card analysis-surface-card", children=[
                         html.H4("Antes de analizar", className="card-title"),
-                        html.P(
-                            "Elige al deportista y confirma qué lectura tienes disponible hoy antes de abrir los gráficos.",
-                            className="text-muted",
-                            style={"marginBottom": "12px"},
-                        ),
+                        html.P(before_analyze_sub, className="text-muted"),
                         user_selector,
                         html.Div(className="analysis-sensor-box", children=[
                             html.Div("Sensores del día", className="analysis-mini-label"),
                             html.Div(sensors_text, className="text-muted"),
-                            html.Div(id="signals-sensors-banner", className="text-muted", style={"marginTop": "6px"}),
+                            html.Div(id="signals-sensors-banner", className="text-muted banner-row"),
                         ]),
                     ]),
                     html.Div(className="analysis-surface-wrap", children=[session_block]),

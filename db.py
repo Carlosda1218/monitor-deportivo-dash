@@ -364,6 +364,36 @@ def init_db():
         )"""
         )
 
+        # ---------- Dispositivos físicos de sensores ----------
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS sensor_devices(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            sensor_code TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            device_label TEXT,
+            status TEXT DEFAULT 'paired',
+            last_seen TEXT,
+            firmware_version TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, device_id)
+        )"""
+        )
+        # Migraciones suaves por si la tabla ya existía sin alguna columna
+        for _col, _def in [
+            ("device_label", "TEXT"),
+            ("status", "TEXT DEFAULT 'paired'"),
+            ("last_seen", "TEXT"),
+            ("firmware_version", "TEXT"),
+            ("notes", "TEXT"),
+        ]:
+            if not _has_column(con, "sensor_devices", _col):
+                try:
+                    cur.execute(f"ALTER TABLE sensor_devices ADD COLUMN {_col} {_def}")
+                except sqlite3.OperationalError:
+                    pass
+
         # ---------- Archivos ECG ----------
         cur.execute(
             """CREATE TABLE IF NOT EXISTS ecg_files(
@@ -579,18 +609,25 @@ def list_coaches():
     return out
 
 
-def list_athletes_for_coach(coach_id: int):
+def list_athletes_for_coach(coach_id: int, sport: str = None):
     """
-    LEGACY: Lista deportistas asignados a un coach concreto vía users.coach_id.
-    (Se mantiene para no romper la app mientras migras a adopción/equipos.)
+    Lista deportistas asignados a un coach concreto vía users.coach_id.
+    Si se pasa `sport`, solo devuelve deportistas de ese deporte.
     """
     with _get_conn() as con:
         cur = con.cursor()
-        cur.execute(
-            "SELECT id,name,role,sport,created_at,coach_id "
-            "FROM users WHERE role='deportista' AND coach_id=? ORDER BY id DESC",
-            (coach_id,),
-        )
+        if sport:
+            cur.execute(
+                "SELECT id,name,role,sport,created_at,coach_id "
+                "FROM users WHERE role='deportista' AND coach_id=? AND sport=? ORDER BY id DESC",
+                (coach_id, sport),
+            )
+        else:
+            cur.execute(
+                "SELECT id,name,role,sport,created_at,coach_id "
+                "FROM users WHERE role='deportista' AND coach_id=? ORDER BY id DESC",
+                (coach_id,),
+            )
         rows = cur.fetchall()
     out = []
     for r in rows:
@@ -1239,6 +1276,120 @@ def set_user_sensors(uid: int, codes):
                 "INSERT INTO user_sensors(user_id,sensor_code) VALUES(?,?)",
                 (uid, c),
             )
+
+
+# ======================
+# Dispositivos físicos
+# ======================
+
+def register_device(user_id: int, sensor_code: str, device_id: str,
+                    device_label: str = None, firmware_version: str = None) -> int:
+    """
+    Registra (o actualiza) un dispositivo físico para un usuario.
+    Devuelve el id de la fila en sensor_devices.
+    """
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """INSERT INTO sensor_devices
+               (user_id, sensor_code, device_id, device_label, status, firmware_version, created_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(user_id, device_id) DO UPDATE SET
+                 sensor_code      = excluded.sensor_code,
+                 device_label     = COALESCE(excluded.device_label, device_label),
+                 status           = 'paired',
+                 firmware_version = COALESCE(excluded.firmware_version, firmware_version)
+            """,
+            (user_id, sensor_code, device_id, device_label, "paired", firmware_version, now),
+        )
+        cur.execute(
+            "SELECT id FROM sensor_devices WHERE user_id=? AND device_id=?",
+            (user_id, device_id),
+        )
+        row = cur.fetchone()
+        return row[0] if row else -1
+
+
+def update_device_last_seen(device_id: str, user_id: int) -> bool:
+    """
+    Actualiza last_seen y marca status='connected'.
+    Llamado por el endpoint /api/sensor-ping.
+    Devuelve True si encontró el dispositivo.
+    """
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """UPDATE sensor_devices SET last_seen=?, status='connected'
+               WHERE device_id=? AND user_id=?""",
+            (now, device_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def get_user_devices(user_id: int) -> list:
+    """
+    Devuelve todos los dispositivos registrados para un usuario,
+    con status calculado según last_seen:
+      - 'connected'     si last_seen < 5 min
+      - 'idle'          si last_seen entre 5 min y 1 h
+      - 'offline'       si last_seen > 1 h
+      - 'paired'        si nunca ha pingado (last_seen IS NULL)
+    """
+    from datetime import timezone
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            """SELECT id, user_id, sensor_code, device_id, device_label,
+                      status, last_seen, firmware_version, notes, created_at
+               FROM sensor_devices WHERE user_id=? ORDER BY sensor_code, created_at""",
+            (user_id,),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+
+    now = datetime.utcnow()
+    for r in rows:
+        ls = r.get("last_seen")
+        if not ls:
+            r["computed_status"] = "paired"
+        else:
+            try:
+                delta = (now - datetime.fromisoformat(ls)).total_seconds()
+                if delta < 300:
+                    r["computed_status"] = "connected"
+                elif delta < 3600:
+                    r["computed_status"] = "idle"
+                else:
+                    r["computed_status"] = "offline"
+            except Exception:
+                r["computed_status"] = "paired"
+    return rows
+
+
+def get_device_by_id(device_id: str, user_id: int) -> dict:
+    """Devuelve info del dispositivo o None si no existe."""
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            "SELECT * FROM sensor_devices WHERE device_id=? AND user_id=?",
+            (device_id, user_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def delete_device(device_id: str, user_id: int) -> bool:
+    """Elimina el emparejamiento de un dispositivo. Devuelve True si lo encontró."""
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM sensor_devices WHERE device_id=? AND user_id=?",
+            (device_id, user_id),
+        )
+        return cur.rowcount > 0
 
 
 # ======================

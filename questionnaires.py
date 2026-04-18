@@ -145,3 +145,67 @@ def score_breakdown(ans: Dict, sport: str | None = None, competition: bool = Fal
 
 def wellness_score(ans: Dict, sport: str | None = None, competition: bool = False, weight: bool = False, injury: bool = False) -> float:
     return score_breakdown(ans, sport=sport, competition=competition, weight=weight, injury=injury)["score"]
+
+
+# ── Cuestionario del COACH ──────────────────────────────────────────────────
+# El coach no responde preguntas sobre sí mismo sino observaciones del equipo.
+
+COACH_QUESTION_DEFS: List[dict] = [
+    # Observación del equipo
+    {"key": "cq_energia_equipo",   "label": "¿Cómo ves la energía y disposición del equipo hoy?",                                             "min": 1, "max": 5, "step": 1, "default": 3, "group": "equipo",  "dimension": "positive", "weight": 16},
+    {"key": "cq_motivacion",       "label": "¿El grupo llega motivado y concentrado a la sesión?",                                             "min": 1, "max": 5, "step": 1, "default": 3, "group": "equipo",  "dimension": "positive", "weight": 14},
+    {"key": "cq_cohesion",         "label": "¿Cómo está el ambiente y la dinámica del grupo hoy?",                                             "min": 1, "max": 5, "step": 1, "default": 3, "group": "equipo",  "dimension": "positive", "weight": 10},
+    # Alertas y carga
+    {"key": "cq_carga_acumulada",  "label": "¿Con cuánta carga acumulada llega el equipo? (1 = muy fresco · 5 = muy cargado)",                "min": 1, "max": 5, "step": 1, "default": 2, "group": "alertas", "dimension": "risk",     "weight": 14},
+    {"key": "cq_molestias_equipo", "label": "¿Cuántos deportistas llegan hoy con molestias o limitaciones? (1 = ninguno · 5 = varios)",       "min": 1, "max": 5, "step": 1, "default": 1, "group": "alertas", "dimension": "risk",     "weight": 12},
+    # Sesión planificada (sin peso en el score — son contexto)
+    {"key": "cq_intensidad_sesion","label": "¿Cuál es la intensidad de la sesión planificada? (1 = recuperación activa · 5 = máxima exigencia)", "min": 1, "max": 5, "step": 1, "default": 3, "group": "sesion",  "dimension": "positive", "weight": 0},
+    {"key": "cq_complejidad_tecnica","label": "¿Qué tan técnica o tácticamente exigente es lo planificado? (1 = básico · 5 = muy complejo)",    "min": 1, "max": 5, "step": 1, "default": 3, "group": "sesion",  "dimension": "positive", "weight": 0},
+]
+
+
+def coach_question_defs() -> List[dict]:
+    return COACH_QUESTION_DEFS
+
+
+def coach_questions():
+    return [(q["key"], q["label"]) for q in COACH_QUESTION_DEFS]
+
+
+def coach_score_breakdown(ans: Dict) -> dict:
+    """Score 0-100 that represents the team's readiness as observed by the coach."""
+    pos_sum = pos_w = risk_sum = risk_w = 0.0
+    details = []
+    for q in COACH_QUESTION_DEFS:
+        if q["weight"] == 0:
+            continue
+        raw = ans.get(q["key"], q.get("default", 3))
+        item_score = _norm_1_5(raw)
+        item = {
+            "key": q["key"],
+            "label": q["label"],
+            "raw": raw,
+            "score": item_score,
+            "dimension": q["dimension"],
+            "weight": q["weight"],
+            "group": q["group"],
+        }
+        details.append(item)
+        if q["dimension"] == "positive":
+            pos_sum += item_score * q["weight"]
+            pos_w += q["weight"]
+        else:
+            risk_sum += item_score * q["weight"]
+            risk_w += q["weight"]
+
+    positive_avg = (pos_sum / pos_w) if pos_w else 50.0
+    risk_avg = (risk_sum / risk_w) if risk_w else 0.0
+    total = max(0.0, min(100.0, 0.65 * positive_avg + 0.35 * (100.0 - risk_avg)))
+
+    return {
+        "score": float(total),
+        "positive_avg": float(positive_avg),
+        "risk_avg": float(risk_avg),
+        "details": details,
+        "active_keys": [q["key"] for q in COACH_QUESTION_DEFS],
+    }

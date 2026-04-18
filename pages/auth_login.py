@@ -63,7 +63,7 @@ layout = html.Div(className="auth-wrap", children=[
                 ]),
                 html.Div(className="auth-left__feature", children=[
                     html.Div(className="auth-left__feature-dot"),
-                    "Taekwondo, Boxeo, Judo, MMA y más",
+                    "Taekwondo y Boxeo — análisis especializado por deporte",
                 ]),
             ]),
         ]),

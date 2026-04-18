@@ -498,7 +498,11 @@ class CompareView:
 
         # Qué deportistas puede ver
         if role == "coach" and uid:
-            athletes = self.db.list_athletes_for_coach(int(uid))
+            coach_sport = (session.get("sport") or "")
+            if isinstance(coach_sport, bytes):
+                coach_sport = coach_sport.decode("utf-8", "replace")
+            coach_sport = coach_sport.strip() or None
+            athletes = self.db.list_athletes_for_coach(int(uid), sport=coach_sport)
         elif role == "deportista" and uid:
             u = self.db.get_user_by_id(int(uid))
             athletes = [u] if u and u.get("role") == "deportista" else []

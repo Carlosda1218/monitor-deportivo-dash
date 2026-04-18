@@ -2,7 +2,7 @@
 from flask import session
 import db
 
-DEPORTES = ["Taekwondo","Judo","Kickboxing","Box","Muay Thai","MMA","Karate","Sambo"]
+DEPORTES = ["Taekwondo", "Box"]
 SYMS = "!@#$%^&*()-_=+[]{};:'\",.<>/?\\|`~"
 
 

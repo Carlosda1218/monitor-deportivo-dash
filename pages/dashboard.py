@@ -45,13 +45,7 @@ def _profile_label(value, fallback="Sin definir"):
 
 def _profile_grid_item(label, value):
     return html.Div(
-        className="inner-cell",
-        style={
-            "background": "#151a21",
-            "border": "1px solid #232a36",
-            "borderRadius": "12px",
-            "padding": "12px",
-        },
+        className="profile-grid-item",
         children=[
             html.Div(label, className="kpi-label"),
             html.Div(_profile_label(value), className="kpi-value", style={"fontSize": "18px"}),
@@ -281,59 +275,47 @@ def _weekly_card_athlete(summary):
     wellness_str = f"{wellness_avg:.0f} / 100" if wellness_avg is not None else "Sin datos"
 
     return html.Div(
-        className="inner-card",
-        style={
-            "background": "#0f131a",
-            "border": f"1px solid {color}",
-            "borderRadius": "14px",
-            "padding": "18px 20px",
-            "marginTop": "18px",
-        },
+        className=f"athlete-week-card",
+        style={"borderLeftColor": color},
         children=[
             html.Div(
-                style={"display": "flex", "alignItems": "center", "justifyContent": "space-between", "marginBottom": "14px"},
+                className="athlete-week-card__header",
                 children=[
                     html.H4("Tu semana", className="card-title", style={"margin": 0}),
                     html.Span(
                         _FLAG_LABELS.get(flag, ""),
-                        style={
-                            "background": color,
-                            "color": "#fff",
-                            "borderRadius": "20px",
-                            "padding": "3px 14px",
-                            "fontSize": "13px",
-                            "fontWeight": "600",
-                        }
+                        className="athlete-week-card__badge",
+                        style={"background": color},
                     ),
                 ]
             ),
             html.Div(
-                style={"display": "grid", "gridTemplateColumns": "1fr 1fr 1fr 1fr", "gap": "12px"},
+                className="athlete-week-stats",
                 children=[
                     html.Div([
                         html.Div("Sesiones", className="kpi-label"),
                         html.Div(str(n_sessions), className="kpi-value"),
                         html.Div("últimos 7 días", className="kpi-sub"),
-                    ], className="inner-cell", style={"background": "#151a21", "borderRadius": "10px", "padding": "12px"}),
+                    ], className="athlete-week-stat"),
                     html.Div([
                         html.Div("Carga total", className="kpi-label"),
                         html.Div(load_str, className="kpi-value"),
                         html.Div("RPE × min", className="kpi-sub"),
-                    ], className="inner-cell", style={"background": "#151a21", "borderRadius": "10px", "padding": "12px"}),
+                    ], className="athlete-week-stat"),
                     html.Div([
                         html.Div("Bienestar prom.", className="kpi-label"),
                         html.Div(wellness_str, className="kpi-value"),
                         html.Div("últimos 7 días", className="kpi-sub"),
-                    ], className="inner-cell", style={"background": "#151a21", "borderRadius": "10px", "padding": "12px"}),
+                    ], className="athlete-week-stat"),
                     html.Div([
                         html.Div("Tendencia", className="kpi-label"),
                         html.Div(
                             _TREND_ICONS.get(trend, "→"),
                             className="kpi-value",
-                            style={"color": color}
+                            style={"color": color},
                         ),
                         html.Div(_TREND_LABELS.get(trend, ""), className="kpi-sub"),
-                    ], className="inner-cell", style={"background": "#151a21", "borderRadius": "10px", "padding": "12px"}),
+                    ], className="athlete-week-stat"),
                 ]
             ),
         ]
@@ -355,41 +337,35 @@ def _athlete_card_coach(athlete):
     wellness_str = f"{wellness_avg:.0f}" if wellness_avg is not None else "—"
 
     return html.Div(
-        className="inner-card",
-        style={
-            "background": "#0f131a",
-            "border": f"1px solid {color}40",
-            "borderLeft": f"3px solid {color}",
-            "borderRadius": "10px",
-            "padding": "14px 16px",
-        },
+        className=f"athlete-card-coach athlete-card-coach--{flag}",
         children=[
             html.Div(
-                style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"},
+                className="athlete-card-coach__header",
                 children=[
                     html.Div([
-                        html.Div(name, style={"fontWeight": "600", "fontSize": "15px", "color": "#e8ecf0"}),
-                        html.Div(sport, style={"fontSize": "12px", "opacity": 0.6, "marginTop": "2px"}),
+                        html.Div(name,  className="athlete-card-coach__name"),
+                        html.Div(sport, className="athlete-card-coach__sport"),
                     ]),
-                    html.Span("●", style={"color": color, "fontSize": "20px", "lineHeight": "1"}),
+                    html.Span("●", className="athlete-card-coach__dot", style={"color": color}),
                 ]
             ),
             html.Div(
-                style={"display": "grid", "gridTemplateColumns": "1fr 1fr 1fr", "gap": "8px", "marginTop": "12px"},
+                className="athlete-card-coach__stats",
                 children=[
                     html.Div([
-                        html.Div("Sesiones", style={"fontSize": "11px", "opacity": 0.6}),
-                        html.Div(str(n_sessions), style={"fontWeight": "700", "fontSize": "20px", "color": "#e8ecf0"}),
+                        html.Div("Sesiones",   className="athlete-card-coach__stat-label"),
+                        html.Div(str(n_sessions), className="athlete-card-coach__stat-value"),
                     ]),
                     html.Div([
-                        html.Div("Carga (UA)", style={"fontSize": "11px", "opacity": 0.6}),
-                        html.Div(load_str, style={"fontWeight": "700", "fontSize": "20px", "color": "#e8ecf0"}),
+                        html.Div("Carga (UA)", className="athlete-card-coach__stat-label"),
+                        html.Div(load_str,     className="athlete-card-coach__stat-value"),
                     ]),
                     html.Div([
-                        html.Div("Bienestar", style={"fontSize": "11px", "opacity": 0.6}),
+                        html.Div("Bienestar",  className="athlete-card-coach__stat-label"),
                         html.Div(
                             f"{wellness_str} {_TREND_ICONS.get(trend, '→')}",
-                            style={"fontWeight": "700", "fontSize": "20px", "color": color}
+                            className="athlete-card-coach__stat-value",
+                            style={"color": color},
                         ),
                     ]),
                 ]
@@ -473,20 +449,19 @@ def _recommendations_card(recs):
     if not recs:
         return html.Div()
 
-    _icon_color = {"info": "#27c98f", "warning": "#f0a832", "alert": "#e45a5a"}
     _icons = {"info": "→", "warning": "!", "alert": "!!"}
 
-    items = []
-    for r in recs:
-        lv = r.get("level", "info")
-        items.append(html.Div(className=f"rec-item rec-item--{lv}", children=[
-            html.Span(_icons.get(lv, "→"), className="rec-item__icon"),
+    items = [
+        html.Div(className=f"rec-item rec-item--{r.get('level','info')}", children=[
+            html.Span(_icons.get(r.get("level", "info"), "→"), className="rec-item__icon"),
             html.Span(r["text"], className="rec-item__text"),
-        ]))
+        ])
+        for r in recs
+    ]
 
     return html.Div(
         className="inner-card",
-        style={"background": "#0f131a", "border": "1px solid #232a36", "borderRadius": "14px", "padding": "18px 20px", "marginTop": "14px"},
+        style={"padding": "18px 20px", "marginTop": "14px"},
         children=[
             html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px", "marginBottom": "14px"}, children=[
                 html.H4("Recomendaciones del día", className="card-title", style={"margin": 0}),
@@ -497,288 +472,152 @@ def _recommendations_card(recs):
     )
 
 
-def _coach_alerts(team_summary):
-    alerts = [a for a in team_summary if a.get("weekly", {}).get("flag") == "red"]
-    if not alerts:
-        return html.Div()
-    names = ", ".join(_safe_str(a.get("name"), "Atleta") for a in alerts)
-    return html.Div(
-        className="inner-card inner-card--alert",
-        style={"background": "#1a0a0a", "border": "1px solid #e45a5a40", "borderLeft": "3px solid #e45a5a",
-               "borderRadius": "8px", "padding": "10px 14px", "marginTop": "10px",
-               "display": "flex", "gap": "10px", "alignItems": "flex-start"},
-        children=[
-            html.Span("!!", style={"color": "#e45a5a", "fontWeight": "700", "fontSize": "14px", "minWidth": "18px"}),
-            html.Span(f"Requieren atención esta semana: {names}. Revisa su carga y bienestar antes de la próxima sesión.",
-                      style={"fontSize": "14px", "color": "#d8dde6", "lineHeight": "1.5"}),
-        ]
-    )
-
-
 def _parse_ts(ts):
+    """Parsea timestamp ISO o YYYY-MM-DD, devuelve datetime o None."""
     if not ts:
         return None
-    try:
-        from datetime import datetime
-        return datetime.fromisoformat(str(ts).replace("T", " ")[:19])
-    except Exception:
-        return None
+    from datetime import datetime
+    s = str(ts).strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            trunc = s[:19] if fmt == "%Y-%m-%dT%H:%M:%S" else (s[:10] if fmt == "%Y-%m-%d" else s)
+            return datetime.strptime(trunc, fmt)
+        except ValueError:
+            continue
+    return None
 
 
-def _parse_answers_json(raw):
-    if not raw:
-        return {}
-    try:
-        import json as _json
-        if isinstance(raw, (bytes, bytearray)):
-            raw = raw.decode("utf-8", "ignore")
-        data = _json.loads(raw) if isinstance(raw, str) else raw
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _safe_int(value, default=None):
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _coach_focus_candidates(team_summary):
+def _coach_daily_snapshot(team_summary):
     from datetime import datetime
 
-    candidates = []
+    snapshot = {
+        "total": 0,
+        "checkins_ready": 0,
+        "checkins_pending": 0,
+        "review_count": 0,
+        "competition_week": 0,
+        "priority_red": 0,
+        "priority_yellow": 0,
+        "ready_today": 0,
+        "pending_names": [],
+        "competition_names": [],
+    }
+    review_ids = set()
     now = datetime.utcnow()
 
     for athlete in (team_summary or []):
         athlete_id = athlete.get("id")
-        if athlete_id is None:
-            continue
+        athlete_name = _safe_str(athlete.get("name"), "Atleta")
+        snapshot["total"] += 1
+
+        weekly = athlete.get("weekly", {}) or {}
+        flag = (weekly.get("flag") or "gray").strip().lower()
+        if flag == "red":
+            snapshot["priority_red"] += 1
+            review_ids.add(athlete_id or athlete_name)
+        elif flag == "yellow":
+            snapshot["priority_yellow"] += 1
 
         try:
-            athlete_profile = db.get_athlete_profile(int(athlete_id)) if hasattr(db, "get_athlete_profile") else _profile_defaults()
+            athlete_profile = (
+                db.get_athlete_profile(int(athlete_id))
+                if athlete_id and hasattr(db, "get_athlete_profile")
+                else _profile_defaults()
+            )
         except Exception:
             athlete_profile = _profile_defaults()
 
+        competition = (athlete_profile.get("competition_proximity") or "").strip()
+        if competition == "Semana competitiva":
+            snapshot["competition_week"] += 1
+            snapshot["competition_names"].append(athlete_name)
+            review_ids.add(athlete_id or athlete_name)
+
         try:
-            qrows = db.list_questionnaires(int(athlete_id)) or []
+            qrows = db.list_questionnaires(int(athlete_id)) if athlete_id else []
         except Exception:
             qrows = []
 
         latest_q = qrows[0] if qrows else None
         latest_dt = _parse_ts((latest_q or {}).get("ts"))
-        latest_answers = _parse_answers_json((latest_q or {}).get("answers_json"))
-        latest_wellness = (latest_q or {}).get("wellness_score")
+        latest_score = (latest_q or {}).get("wellness_score")
 
-        weekly = athlete.get("weekly", {}) or {}
-        load_units = weekly.get("load_units")
-        load_units_num = float(load_units) if load_units is not None else 0.0
-        trend = (weekly.get("trend") or "stable").strip().lower()
-        flag = (weekly.get("flag") or "gray").strip().lower()
-        sport = (athlete.get("sport") or "").strip().lower()
-        competition = (athlete_profile.get("competition_proximity") or "").strip()
-        watch_zone = (athlete_profile.get("watch_zone") or "").strip()
+        fresh_checkin = False
+        if latest_q and latest_dt is not None:
+            age_hours = max(0.0, (now - latest_dt).total_seconds() / 3600.0)
+            fresh_checkin = age_hours <= 36
 
-        reasons = []
-        score = 0
-
-        if latest_q is None:
-            reasons.append("sin check-in reciente")
-            score += 110
-            checkin_stale = True
+        if fresh_checkin:
+            snapshot["checkins_ready"] += 1
+            try:
+                score_num = float(latest_score)
+            except Exception:
+                score_num = None
+            if score_num is not None and score_num >= 70 and flag != "red":
+                snapshot["ready_today"] += 1
         else:
-            checkin_stale = False
-            if latest_dt is None:
-                reasons.append("check-in con fecha no clara")
-                score += 45
-                checkin_stale = True
-            else:
-                age_hours = max(0.0, (now - latest_dt).total_seconds() / 3600.0)
-                if age_hours > 36:
-                    reasons.append("check-in no actualizado")
-                    score += 55
-                    checkin_stale = True
+            snapshot["checkins_pending"] += 1
+            snapshot["pending_names"].append(athlete_name)
+            review_ids.add(athlete_id or athlete_name)
 
-            if latest_wellness is not None:
-                try:
-                    latest_wellness = float(latest_wellness)
-                except Exception:
-                    latest_wellness = None
-
-            if latest_wellness is not None and latest_wellness < 55:
-                reasons.append("readiness baja")
-                score += 85
-            elif latest_wellness is not None and latest_wellness < 70:
-                reasons.append("readiness con vigilancia")
-                score += 40
-
-        if flag == "red":
-            reasons.append("semana en rojo")
-            score += 75
-        elif flag == "yellow":
-            reasons.append("semana con atencion")
-            score += 35
-
-        if trend == "up" and load_units_num >= 280:
-            reasons.append("carga subiendo")
-            score += 25
-
-        if competition == "Semana competitiva":
-            reasons.append("semana competitiva")
-            score += 70
-        elif competition == "Próximas 3-4 semanas":
-            reasons.append("competencia cercana")
-            score += 25
-
-        if watch_zone:
-            reasons.append(f"vigilar {watch_zone}")
-            score += 15
-
-        tkd_mol = _safe_int(latest_answers.get("tkd_molestia_inferior"))
-        tkd_exp = _safe_int(latest_answers.get("tkd_explosividad"))
-        box_mol = _safe_int(latest_answers.get("box_molestia_superior"))
-        box_speed = _safe_int(latest_answers.get("box_rapidez"))
-
-        if "taekwondo" in sport:
-            if tkd_mol is not None and tkd_mol >= 4:
-                reasons.append("molestia en tren inferior")
-                score += 45
-            elif tkd_exp is not None and tkd_exp <= 2:
-                reasons.append("explosividad baja")
-                score += 15
-
-        if "boxeo" in sport or sport == "box" or "box" in sport:
-            if box_mol is not None and box_mol >= 4:
-                reasons.append("molestia en tren superior")
-                score += 45
-            elif box_speed is not None and box_speed <= 2:
-                reasons.append("rapidez de manos baja")
-                score += 15
-
-        unique_reasons = []
-        seen = set()
-        for reason in reasons:
-            key = reason.strip().lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            unique_reasons.append(reason)
-
-        if not unique_reasons:
-            continue
-
-        if checkin_stale:
-            headline = "Falta la lectura del dia"
-            action = "Pidele el check-in antes del bloque principal para decidir mejor la carga."
-        elif competition == "Semana competitiva":
-            headline = "Semana sensible de competencia"
-            action = "Confirma frescura y evita sumar volumen si hoy no te cambia la sesion."
-        elif "taekwondo" in sport and tkd_mol is not None and tkd_mol >= 4:
-            headline = "Atleta para proteger el pateo"
-            action = "Si entrena hoy, protege pateo, desplazamiento y pierna de apoyo antes de apretar intensidad."
-        elif ("boxeo" in sport or sport == "box" or "box" in sport) and box_mol is not None and box_mol >= 4:
-            headline = "Atleta para proteger manos y guardia"
-            action = "Si entrena hoy, baja contacto y vigila hombro, mano y guardia antes del bloque fuerte."
-        elif flag == "red":
-            headline = "Carga y bienestar delicados"
-            action = "Abre su sesion o su analisis antes de decidir intensidad o volumen."
-        elif flag == "yellow":
-            headline = "Seguimiento fino antes de apretar"
-            action = "Mantenlo bajo vigilancia y revisa como responde antes del bloque mas exigente."
-        else:
-            headline = "Atleta para revisar con contexto"
-            action = "Revisa su estado del dia y mantente atento a como entra en la sesion."
-
-        if score >= 130:
-            badge_label = "Primero"
-            badge_color = "#e45a5a"
-            badge_bg = "#1a0a0a"
-        elif score >= 75:
-            badge_label = "Mirar hoy"
-            badge_color = "#f0a832"
-            badge_bg = "#1a150a"
-        else:
-            badge_label = "Seguimiento"
-            badge_color = "#2fb7c4"
-            badge_bg = "#0a1518"
-
-        candidates.append({
-            "score": score,
-            "name": _safe_str(athlete.get("name"), "Atleta"),
-            "sport": _safe_str(athlete.get("sport"), "-"),
-            "headline": headline,
-            "action": action,
-            "reasons": unique_reasons[:3],
-            "badge_label": badge_label,
-            "badge_color": badge_color,
-            "badge_bg": badge_bg,
-        })
-
-    candidates.sort(key=lambda item: item["score"], reverse=True)
-    return candidates[:4]
+    snapshot["review_count"] = len(review_ids)
+    return snapshot
 
 
-def _coach_focus_today(team_summary):
-    if not team_summary:
-        return html.Div()
+def _coach_followup_card(snapshot):
+    pending_names = snapshot.get("pending_names", [])
+    competition_names = snapshot.get("competition_names", [])
+    pending = snapshot.get("checkins_pending", 0)
 
-    candidates = _coach_focus_candidates(team_summary)
-    if not candidates:
-        return html.Div(
-            className="inner-card",
-            style={"borderRadius": "14px", "padding": "16px 20px", "marginTop": "16px"},
-            children=[
-                html.H4("A quien mirar hoy", className="card-title"),
-                html.Small("Hoy no hay banderas fuertes en el equipo. Puedes seguir el plan y usar sesion o analisis como apoyo fino.", className="text-muted"),
-            ],
+    items = []
+    if pending:
+        pending_text = ", ".join(pending_names[:3])
+        if pending > 3:
+            pending_text += " y más"
+        items.append(
+            html.Li(
+                [
+                    html.Strong("Falta la entrada del día de: "),
+                    f"{pending_text}.",
+                ]
+            )
+        )
+    else:
+        items.append(
+            html.Li("Todo el equipo tiene una lectura reciente para arrancar con más contexto.")
         )
 
-    cards = []
-    for candidate in candidates:
-        reasons_text = " · ".join(candidate["reasons"])
-        cards.append(
-            html.Div(
-                className="focus-candidate",
-                style={
-                    "border": f"1px solid {candidate['badge_color']}35",
-                    "borderLeft": f"3px solid {candidate['badge_color']}",
-                    "borderRadius": "10px",
-                    "padding": "14px 16px",
-                },
-                children=[
-                    html.Div(
-                        style={"display": "flex", "justifyContent": "space-between", "alignItems": "flex-start", "gap": "12px"},
-                        children=[
-                            html.Div([
-                                html.Div(candidate["name"], style={"fontWeight": "700", "fontSize": "15px", "color": "#e8ecf0"}),
-                                html.Div(candidate["sport"], style={"fontSize": "12px", "opacity": 0.6, "marginTop": "2px"}),
-                            ]),
-                            html.Span(
-                                candidate["badge_label"],
-                                style={
-                                    "background": candidate["badge_bg"],
-                                    "color": candidate["badge_color"],
-                                    "border": f"1px solid {candidate['badge_color']}45",
-                                    "borderRadius": "999px",
-                                    "padding": "4px 10px",
-                                    "fontSize": "11px",
-                                    "fontWeight": "700",
-                                    "whiteSpace": "nowrap",
-                                },
-                            ),
-                        ],
-                    ),
-                    html.Div(candidate["headline"], style={"marginTop": "12px", "fontWeight": "700", "fontSize": "14px", "color": "#dfe7f2"}),
-                    html.Div(f"Motivos: {reasons_text}", style={"marginTop": "8px", "fontSize": "13px", "lineHeight": "1.5", "color": "#9fb0c3"}),
-                    html.Div(
-                        [
-                            html.Strong("Accion sugerida: ", style={"color": "#e8ecf0"}),
-                            html.Span(candidate["action"], style={"color": "#d8dde6"}),
-                        ],
-                        style={"marginTop": "10px", "fontSize": "13px", "lineHeight": "1.55"},
-                    ),
-                ],
+    if competition_names:
+        competition_text = ", ".join(competition_names[:3])
+        if len(competition_names) > 3:
+            competition_text += " y más"
+        items.append(
+            html.Li(
+                [
+                    html.Strong("Semana sensible: "),
+                    f"{competition_text} está en semana competitiva.",
+                ]
+            )
+        )
+
+    if snapshot.get("priority_red", 0):
+        red_count = snapshot.get("priority_red", 0)
+        items.append(
+            html.Li(
+                [
+                    html.Strong("Vigilancia alta: "),
+                    f"{red_count} atleta{'s' if red_count != 1 else ''} llega{'n' if red_count != 1 else ''} con alerta roja semanal.",
+                ]
+            )
+        )
+    elif snapshot.get("priority_yellow", 0):
+        yellow_count = snapshot.get("priority_yellow", 0)
+        items.append(
+            html.Li(
+                [
+                    html.Strong("Seguimiento fino: "),
+                    f"{yellow_count} atleta{'s' if yellow_count != 1 else ''} merece{'n' if yellow_count != 1 else ''} control antes del bloque más exigente.",
+                ]
             )
         )
 
@@ -786,295 +625,142 @@ def _coach_focus_today(team_summary):
         className="inner-card",
         style={"borderRadius": "14px", "padding": "16px 20px", "marginTop": "16px"},
         children=[
-            html.H4("A quien mirar hoy", className="card-title"),
-            html.Small("Empieza por estos atletas si quieres abrir una lectura util antes de la sesion.", className="text-muted"),
-            html.Div(
-                style={
-                    "display": "grid",
-                    "gridTemplateColumns": "repeat(auto-fit, minmax(260px, 1fr))",
-                    "gap": "12px",
-                    "marginTop": "14px",
-                },
-                children=cards,
+            html.H4("Qué no perder hoy", className="card-title"),
+            html.P(
+                "Esta lectura rápida te ayuda a no dejar fuera pendientes, contexto competitivo o señales de vigilancia.",
+                className="text-muted",
             ),
+            html.Ul(items, className="list-compact", style={"marginTop": "12px"}),
         ],
     )
 
 
-# --- CS-020: Contador de días a competencia ---
+def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id):
+    athlete_count = len(team_summary or [])
+    coach_snapshot = _coach_daily_snapshot(team_summary)
 
-_COMP_CONFIG = {
-    "Semana competitiva": {
-        "color": "#e45a5a",
-        "bg": "#1a0a0a",
-        "icon": "🏆",
-        "label": "Semana de competencia",
-        "detail": "Prioriza frescura sobre volumen. Nada nuevo esta semana.",
-    },
-    "Próximas 3-4 semanas": {
-        "color": "#f0a832",
-        "bg": "#1a150a",
-        "icon": "⏱",
-        "label": "~3-4 semanas para el torneo",
-        "detail": "Fase de ajuste — mantén intensidad y reduce volumen progresivamente.",
-    },
-    "Próximas 6-8 semanas": {
-        "color": "#2fb7c4",
-        "bg": "#0a1518",
-        "icon": "📅",
-        "label": "~6-8 semanas para el torneo",
-        "detail": "Bloque de carga en curso — buena ventana para trabajo de volumen.",
-    },
-}
+    try:
+        teams = db.list_teams(int(coach_id)) or []
+    except Exception:
+        teams = []
 
+    team_count = len(teams)
+    focus_sport = sport or "Deporte de combate"
+    checkins_ready = coach_snapshot.get("checkins_ready", 0)
+    total = coach_snapshot.get("total", 0)
+    review_count = coach_snapshot.get("review_count", 0)
+    competition_week = coach_snapshot.get("competition_week", 0)
 
-def _competition_badge(athlete_profile):
-    proximity = (athlete_profile.get("competition_proximity") or "").strip()
-    cfg = _COMP_CONFIG.get(proximity)
-    if not cfg:
-        return html.Div()
-
-    color = cfg["color"]
-    return html.Div(
-        className="comp-badge",
-        style={
-            "border": f"1px solid {color}50",
-            "borderLeft": f"3px solid {color}",
-            "borderRadius": "10px",
-            "padding": "12px 16px",
-            "marginTop": "14px",
-            "display": "flex",
-            "alignItems": "center",
-            "gap": "14px",
-        },
-        children=[
-            html.Span(cfg["icon"], style={"fontSize": "22px", "lineHeight": "1"}),
-            html.Div([
-                html.Div(
-                    cfg["label"],
-                    style={"fontWeight": "700", "fontSize": "14px", "color": color},
-                ),
-                html.Div(
-                    cfg["detail"],
-                    style={"fontSize": "13px", "color": "#a0aec0", "marginTop": "2px"},
+    return html.Div([
+        html.Div(className="profile-hero-grid", children=[
+            html.Div(className="page-head profile-hero", children=[
+                html.Div(className="session-pill-row", children=[
+                    html.Span(focus_sport, className="session-pill"),
+                    html.Span("Coach", className="session-pill session-pill--muted"),
+                ]),
+                html.H2("Mi perfil"),
+                html.P(
+                    "Aquí ves tu rol, tu deporte y el estado general del equipo antes de pasar a trabajar.",
+                    className="text-muted",
                 ),
             ]),
-        ],
-    )
-
-
-def _team_kpis(team_summary):
-    """KPIs específicos de coach: semáforo del equipo, bienestar promedio, carga total."""
-    counts = {"green": 0, "yellow": 0, "red": 0, "gray": 0}
-    wellness_vals = []
-    total_load = 0
-
-    for a in team_summary:
-        w = a.get("weekly", {})
-        counts[w.get("flag", "gray")] += 1
-        wv = w.get("wellness_avg")
-        if wv is not None:
-            wellness_vals.append(wv)
-        lu = w.get("load_units")
-        if lu is not None:
-            total_load += lu
-
-    semaphore_parts = []
-    for flag, color, label in [("green","#27c98f","verde"), ("yellow","#f0a832","amarillo"), ("red","#e45a5a","rojo")]:
-        if counts[flag] > 0:
-            semaphore_parts.append(
-                html.Span(f"{counts[flag]} {label}", style={"color": color, "fontWeight": "700"})
-            )
-    semaphore_children = []
-    for i, part in enumerate(semaphore_parts):
-        semaphore_children.append(part)
-        if i < len(semaphore_parts) - 1:
-            semaphore_children.append(html.Span(" / ", style={"opacity": 0.4}))
-
-    wellness_avg_team = sum(wellness_vals) / len(wellness_vals) if wellness_vals else None
-    wellness_str = f"{wellness_avg_team:.0f} / 100" if wellness_avg_team is not None else "Sin datos"
-    load_str = f"{int(total_load)} UA" if total_load else "—"
-
-    return html.Div(className="kpis", children=[
-        html.Div(className="kpi", children=[
-            html.Div("Estado del equipo", className="kpi-label"),
-            html.Div(semaphore_children if semaphore_children else [html.Span("Sin datos")], className="kpi-value"),
-            html.Div(f"{len(team_summary)} atletas en roster", className="kpi-sub"),
-            html.Div(className="kpi-ecg-line"),
-        ]),
-        html.Div(className="kpi", children=[
-            html.Div("Bienestar promedio", className="kpi-label"),
-            html.Div(wellness_str, className="kpi-value"),
-            html.Div("Promedio del equipo esta semana", className="kpi-sub"),
-            html.Div(className="kpi-ecg-line"),
-        ]),
-        html.Div(className="kpi", children=[
-            html.Div("Carga total del equipo", className="kpi-label"),
-            html.Div(load_str, className="kpi-value"),
-            html.Div("Suma RPE × min todos los atletas", className="kpi-sub"),
-            html.Div(className="kpi-ecg-line"),
-        ]),
-    ])
-
-
-def _team_load_chart(team_summary):
-    """Gráfica horizontal de barras: carga semanal por atleta, coloreada por semáforo."""
-    if not team_summary:
-        return html.Div()
-
-    names, loads, colors = [], [], []
-    for a in reversed(team_summary):  # reversed → el primer atleta queda arriba
-        w = a.get("weekly", {})
-        lu = w.get("load_units") or 0
-        flag = w.get("flag", "gray")
-        names.append(_safe_str(a.get("name"), "Atleta"))
-        loads.append(lu)
-        colors.append(_FLAG_COLORS.get(flag, _FLAG_COLORS["gray"]))
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=loads, y=names,
-        orientation="h",
-        marker=dict(color=colors, opacity=0.85),
-        hovertemplate="%{y}: %{x} UA<extra></extra>",
-        showlegend=False,
-    ))
-    _uc.apply_chart_style(fig)
-    fig.update_layout(
-        height=46 + len(names) * 52,
-        margin=dict(l=0, r=16, t=8, b=24),
-        xaxis=dict(title="Carga (UA)", gridcolor="rgba(255,255,255,0.06)"),
-        yaxis=dict(tickfont=dict(size=13)),
-        bargap=0.35,
-    )
-
-    return html.Div(
-        className="inner-card",
-        style={"padding": "16px", "marginTop": "16px"},
-        children=[
-            html.H4("Carga semanal por atleta", className="card-title"),
-            html.P("RPE × minutos acumulados esta semana. Color según semáforo de carga.", className="text-muted"),
-            dcc.Graph(figure=fig, config={"displayModeBar": False}, style={"marginTop": "10px"}),
-        ]
-    )
-
-
-def _coach_priorities(team_summary):
-    """Sección de prioridades: agrupa atletas por urgencia (rojo > amarillo > verde)."""
-    if not team_summary:
-        return html.Div()
-
-    groups = {"red": [], "yellow": [], "green": [], "gray": []}
-    for a in team_summary:
-        flag = a.get("weekly", {}).get("flag", "gray")
-        groups[flag].append(a)
-
-    sections = []
-
-    if groups["red"]:
-        sections.append(_priority_group(
-            "Requieren atención",
-            "Carga o bienestar críticos. Revisión antes de la próxima sesión.",
-            groups["red"], "#e45a5a",
-        ))
-    if groups["yellow"]:
-        sections.append(_priority_group(
-            "Vigilar",
-            "Tendencia a sobrecarga o bienestar moderado. Seguimiento recomendado.",
-            groups["yellow"], "#f0a832",
-        ))
-    if groups["green"]:
-        sections.append(_priority_group(
-            "En forma",
-            "Carga y bienestar dentro del rango óptimo.",
-            groups["green"], "#27c98f",
-        ))
-    if groups["gray"] and not groups["red"] and not groups["yellow"] and not groups["green"]:
-        sections.append(html.Div(
-            "Sin sesiones registradas esta semana.",
-            style={"opacity": 0.5, "fontSize": "13px", "padding": "10px 0"},
-        ))
-
-    return html.Div(
-        className="inner-card",
-        style={"padding": "16px 20px", "marginTop": "16px"},
-        children=[
-            html.H4("Prioridades esta semana", className="card-title"),
-            html.P("Clasificación por urgencia para orientar las decisiones de entrenamiento.", className="text-muted"),
-            html.Div(sections, style={"marginTop": "14px"}),
-        ]
-    )
-
-
-def _priority_group(title, subtitle, athletes, color):
-    """Bloque de un grupo de prioridad dentro de la sección de prioridades."""
-    rows = []
-    for a in athletes:
-        w = a.get("weekly", {})
-        name = _safe_str(a.get("name"), "Atleta")
-        load_str = f"{w.get('load_units')} UA" if w.get("load_units") is not None else "—"
-        wv = w.get("wellness_avg")
-        wellness_str = f"Bienestar {wv:.0f}" if wv is not None else "Sin bienestar"
-        watch = ""
-        try:
-            import json as _json
-            prof_raw = a.get("athlete_profile_json")
-            if prof_raw:
-                prof = _json.loads(prof_raw) if isinstance(prof_raw, str) else prof_raw
-                watch = prof.get("watch_zone") or ""
-        except Exception:
-            pass
-
-        detail_parts = [load_str, wellness_str]
-        if watch:
-            detail_parts.append(f"Vigilar: {watch}")
-
-        rows.append(html.Div(
-            style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
-                   "padding": "8px 0", "borderBottom": "1px solid #1c2330"},
-            children=[
-                html.Div([
-                    html.Span("● ", style={"color": color, "fontSize": "11px"}),
-                    html.Span(name, style={"fontWeight": "600", "fontSize": "14px", "color": "#e8ecf0"}),
-                ]),
-                html.Div(
-                    " · ".join(detail_parts),
-                    style={"fontSize": "12px", "color": "#8fa3bf"},
+            html.Div(className="card profile-focus-card", children=[
+                html.H4("Lo esencial de tu perfil", className="card-title"),
+                html.P(
+                    "Tienes a mano tu rol, tu deporte foco y una lectura rápida del equipo.",
+                    className="text-muted",
                 ),
-            ]
-        ))
-
-    return html.Div(
-        style={"marginBottom": "16px"},
-        children=[
-            html.Div(
-                style={"display": "flex", "alignItems": "baseline", "gap": "8px", "marginBottom": "4px"},
-                children=[
-                    html.Span(title, style={"fontWeight": "700", "fontSize": "13px", "color": color}),
-                    html.Span(subtitle, style={"fontSize": "12px", "opacity": 0.55}),
-                ]
-            ),
-            html.Div(rows),
-        ]
-    )
-
-
-def _team_cards_grid(athletes):
-    if not athletes:
-        return html.Div(
-            "Todavía no tienes atletas en tu roster. Ve a Equipo para añadirlos.",
-            className="inner-card",
-            style={"opacity": 0.7, "marginTop": "16px", "padding": "20px", "fontSize": "14px"},
-        )
-    return html.Div(
-        style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(auto-fill, minmax(260px, 1fr))",
-            "gap": "14px",
-            "marginTop": "14px",
-        },
-        children=[_athlete_card_coach(a) for a in athletes],
-    )
+                html.Ul([
+                    html.Li([html.Strong("Rol: "), "Coach principal"]),
+                    html.Li([html.Strong("Deporte foco: "), focus_sport]),
+                    html.Li([html.Strong("Plantilla actual: "), f"{athlete_count} atleta{'s' if athlete_count != 1 else ''}"]),
+                    html.Li([html.Strong("Alta en la plataforma: "), created_pretty]),
+                ], className="list-compact"),
+            ]),
+        ]),
+        html.Div(className="kpis profile-kpis", children=[
+            html.Div(className="kpi", children=[
+                html.Div("Equipo a cargo", className="kpi-label"),
+                html.Div(str(athlete_count), className="kpi-value"),
+                html.Div(f"{team_count} equipo{'s' if team_count != 1 else ''} activo{'s' if team_count != 1 else ''}", className="kpi-sub"),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+            html.Div(className="kpi", children=[
+                html.Div("Lecturas listas", className="kpi-label"),
+                html.Div(f"{checkins_ready} / {total}" if total else "Sin datos", className="kpi-value"),
+                html.Div("Atletas con contexto reciente para decidir mejor hoy", className="kpi-sub"),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+            html.Div(className="kpi", children=[
+                html.Div("Atención prioritaria", className="kpi-label"),
+                html.Div(str(review_count) if total else "Sin datos", className="kpi-value"),
+                html.Div(
+                    f"{competition_week} en semana competitiva" if competition_week else "Sin casos competitivos urgentes ahora mismo",
+                    className="kpi-sub",
+                ),
+                html.Div(className="kpi-ecg-line"),
+            ]),
+        ]),
+        html.Div(className="profile-main-grid", children=[
+            html.Div(className="profile-stack", children=[
+                _coach_profile_fold(
+                    "Resumen del perfil",
+                    "Consulta aquí tu rol, deporte y estructura actual.",
+                    [
+                        html.Div(className="profile-context-grid", children=[
+                            _profile_grid_item("Nombre visible", name),
+                            _profile_grid_item("Rol", "Coach"),
+                            _profile_grid_item("Deporte principal", focus_sport),
+                            _profile_grid_item("Plantilla actual", f"{athlete_count} atleta{'s' if athlete_count != 1 else ''}"),
+                            _profile_grid_item("Equipos activos", str(team_count)),
+                            _profile_grid_item("Casos a revisar hoy", str(review_count) if total else "0"),
+                        ]),
+                        html.Div(className="profile-note", children=[
+                            html.Strong("Lectura rápida: "),
+                            html.Span(
+                                "Desde aquí puedes pasar al panel, la jornada o el estado del equipo según lo que necesites revisar."
+                            ),
+                        ]),
+                    ],
+                    open_by_default=True,
+                ),
+                _coach_profile_fold(
+                    "Qué revisar hoy",
+                    "Aquí puedes ver pendientes y puntos que conviene vigilar hoy.",
+                    [_coach_followup_card(coach_snapshot)],
+                    open_by_default=False,
+                ),
+            ]),
+            html.Div(className="profile-stack", children=[
+                _coach_profile_fold(
+                    "Qué puedes revisar ahora",
+                    "Desde aquí puedes saltar rápido a la vista que te haga falta hoy.",
+                    [
+                        html.Ul([
+                            html.Li("Entra a Panel de equipo cuando quieras una lectura global del grupo."),
+                            html.Li("Usa Mi jornada para ordenar el día y decidir por dónde empezar."),
+                            html.Li("Abre Estado del equipo si necesitas bajar ya al detalle por atleta."),
+                            html.Li("Pasa a Análisis solo cuando haga falta confirmar señales y respuesta al esfuerzo."),
+                        ], className="list-compact"),
+                    ],
+                    open_by_default=False,
+                ),
+                html.Div(className="card profile-links-card", children=[
+                    html.H4("Accesos útiles", className="card-title"),
+                    html.P(
+                        "Desde aquí entras directo a lo que más vas a consultar durante el día.",
+                        className="text-muted",
+                    ),
+                    html.Div(className="row-wrap-10 session-action-row", children=[
+                        _quick_link("Abrir panel de equipo", "/", primary=True),
+                        _quick_link("Ir a mi jornada", "/sesion"),
+                        _quick_link("Ver estado del equipo", "/usuarios"),
+                        _quick_link("Ir a análisis", "/ecg"),
+                    ]),
+                ]),
+            ]),
+        ]),
+    ], className="page-content profile-shell")
 
 
 def layout():
@@ -1269,7 +955,7 @@ def layout():
                                 children=[
                                     html.Div(className="collapsible-card__head", children=[
                                         html.H4("Editar perfil deportivo", className="card-title"),
-                                        html.P("Abre este bloque si quieres actualizar tu contexto sin llenar la pantalla de controles.", className="text-muted"),
+                                        html.P("Actualiza aquí tu perfil deportivo cuando cambie tu contexto.", className="text-muted"),
                                     ]),
                                     html.Span("›", className="collapsible-card__chevron"),
                                 ],
@@ -1348,32 +1034,11 @@ def layout():
             ]),
         ], className="page-content profile-shell")
 
+    if role == "coach":
+        return _coach_profile_layout_v3(name, sport, created_pretty, team_summary, uid_int)
+
     return html.Div([
-        html.Div(className="page-head", children=[
-            html.H2(f"Panel de {name}"),
-            html.P(
-                f"Vista de coach · {sport} · {len(team_summary)} atleta{'s' if len(team_summary) != 1 else ''} en roster.",
-                className="text-muted",
-            ),
-        ]),
-        html.Div(className="ecg-divider"),
-        _team_kpis(team_summary),
-        _coach_focus_today(team_summary),
-        _coach_priorities(team_summary),
-        _team_load_chart(team_summary),
-        html.Div(
-            className="card",
-            style={"marginTop": "20px"},
-            children=[
-                html.H4("Detalle del equipo", className="card-title"),
-                html.P("Carga acumulada (RPE × min) y bienestar promedio de los últimos 7 días.", className="text-muted"),
-                _team_cards_grid(team_summary),
-                _coach_alerts(team_summary),
-            ]
-        ),
-        html.Div(className="filters-bar", style={"marginTop": "20px", "gap": "10px"}, children=[
-            _quick_link("Ver equipo", "/usuarios", primary=True),
-            _quick_link("Ir a análisis", "/ecg"),
-            _quick_link("Wellbeing del equipo", "/cuestionario"),
-        ]),
-    ], className="page-content profile-shell")
+        html.H2("Panel"),
+        html.P("Rol no reconocido. Vuelve a iniciar sesión.", className="text-muted"),
+    ], className="page-content")
+
