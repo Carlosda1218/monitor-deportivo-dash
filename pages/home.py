@@ -478,8 +478,10 @@ def layout():
             ),
         ]
 
+    shell_cls = "home-shell coach-shell" if role == "coach" else "home-shell"
+
     return html.Div(
-        className="home-shell",
+        className=shell_cls,
         children=[
             html.Div(
                 className="card home-hero",

@@ -451,3 +451,30 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ================================================================
+   Coach home — tema amber sobre el hero y badges
+   ================================================================ */
+
+.coach-shell .home-hero {
+  border-color: rgba(240, 168, 50, .18);
+  background:
+    radial-gradient(780px 420px at 0% 0%, rgba(240, 168, 50, .07), transparent 64%),
+    radial-gradient(720px 420px at 100% 100%, rgba(200, 136, 30, .06), transparent 64%),
+    linear-gradient(160deg, rgba(25, 36, 49, .96) 0%, rgba(20, 29, 40, .98) 100%);
+}
+
+.coach-shell .home-badge {
+  color: var(--coach);
+  background: rgba(240, 168, 50, .12);
+  border-color: rgba(240, 168, 50, .28);
+}
+
+.coach-shell .home-summary-kpi__value {
+  color: var(--coach);
+}
+
+.coach-shell .home-flow__num {
+  background: linear-gradient(135deg, var(--coach-soft), var(--coach));
+  color: #0d0d0d;
+}
