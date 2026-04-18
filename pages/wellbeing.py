@@ -349,7 +349,20 @@ def _layout_coach_checkin(coach_id: int):
         group_qs = [_make_slider(q) for q in defs if q.get("group") == gk]
         question_items.append(_group_block(gk, group_qs, visible=True, open_default=(gk != "sesion")))
 
+    # Componentes ocultos requeridos por save_q (que comparte btn-save-q como Input)
+    # Sin estos, Dash lanza "nonexistent object in State" cuando el coach hace click.
+    hidden_athlete_states = html.Div(style={"display": "none"}, children=[
+        dcc.Dropdown(id="q-user",       options=[], value=None),
+        dcc.Dropdown(id="q-session",    options=[], value="NONE"),
+        dcc.Dropdown(id="q-competition",options=[{"label":"No","value":"no"}], value="no"),
+        dcc.Dropdown(id="q-weight",     options=[{"label":"No","value":"no"}], value="no"),
+        dcc.Dropdown(id="q-injury",     options=[{"label":"No","value":"no"}], value="no"),
+        *[dcc.Slider(id=f"q-{k}", min=1, max=5, step=1, value=3)
+          for k, _ in Q.questions()],
+    ])
+
     return html.Div(className="coach-shell", children=[
+        hidden_athlete_states,
         html.Div(className="page-head", children=[
             html.H2("Check-in del equipo"),
             html.P(
@@ -733,10 +746,11 @@ def save_coach_q(n, *values):
     if not coach_id:
         raise PreventUpdate
 
+    coach_defs = {q["key"]: q for q in Q.coach_question_defs()}
     ans = {}
     for (k, _), v in zip(Q.coach_questions(), values):
-        meta = Q.question_meta(k)
-        ans[k] = meta.get("default", 3) if v is None else v
+        default = coach_defs.get(k, {}).get("default", 3)
+        ans[k] = default if v is None else v
 
     breakdown = Q.coach_score_breakdown(ans)
     score = breakdown["score"]
