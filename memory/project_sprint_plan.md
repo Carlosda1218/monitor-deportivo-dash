@@ -1097,3 +1097,53 @@ Refinado:
 - Penalizacion por overlap corporal (`cuerpo_cruzado`, `oclusion_parcial`).
 - Galeria dual filtrada para mostrar solo frames limpios.
 - Metadata visible por frame destacado: `t` y `score`.
+
+## Sprint Confianza Biomecanica 2026-05-27 - Sin Atleta Claro
+
+Completado:
+
+- Cierre de falso positivo por ausencia/ruido:
+  - nuevo helper `_candidate_athlete_evidence()`;
+  - rechazo `sin_evidencia_atleta`;
+  - sin fallback a poses crudas cuando duelo no encuentra atletas claros.
+- Cruce corporal severo ahora puede rechazar frame como `cuerpo_cruzado`.
+- UI: chip `Sin atleta claro`.
+
+Validacion:
+
+- `videoplayback.mp4` con `sample_every=12`, `max_frames=540`:
+  - `paired_frames`: 45;
+  - `target_confidence`: 0.632;
+  - `target_coverage`: 0.083;
+  - keyframes limpios conservados: 48.5s, 86.0s, 95.0s, 127.5s, 136.5s, 201.0s.
+- Compileall, import app, pytest, flow test y load test en verde.
+
+Siguiente foco:
+
+- Revisar UX para explicar cobertura baja sin que parezca fallo.
+- Continuar con suavizado temporal/selector objetivo si el usuario ve saltos
+  restantes en frames no destacados.
+
+Refinado posterior:
+
+- Se agregaron filtros para galeria:
+  - `esqueleto_colapsado`;
+  - `casco_sin_peto_coherente`;
+  - `cuerpo_recortado`.
+- Resultados antiguos se invalidan con `shape_guard_v3_2026_05_27`.
+- Validacion UI completa:
+  - `901` frames analizados;
+  - `53` frames pareados;
+  - keyframes defendibles: `45.4s`, `135.4s`, `152.9s`, `204.6s`, `241.2s`.
+
+Siguiente foco:
+
+- Explicar visualmente por que cobertura baja = analisis conservador.
+- Evaluar suavizado temporal de tracks para reducir saltos durante contactos.
+
+Control de version/cache:
+
+- Completado `/debug/analyzer-version`.
+- Completado reinicio limpio de puerto `8051` con una sola instancia.
+- Completado auto-clear de stores biomecanicos por version en navegador.
+- Completado meta visible de version + keyframes en la lectura.

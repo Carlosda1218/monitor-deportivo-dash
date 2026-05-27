@@ -327,3 +327,95 @@ Refinamiento tras revisar frames del usuario:
 - Validacion larga con `videoplayback.mp4` selecciono keyframes limpios en:
   `48.5s`, `86.0s`, `95.0s`, `127.5s`, `136.5s`, `201.0s`.
 - Los momentos ~`241.7s` y ~`289.2s` quedaron fuera de la galeria destacada.
+
+## Auditoria 2026-05-27 - Falso Positivo Sin Atleta Claro
+
+Hallazgo:
+
+- `pose_contaminada` cubria mezcla de cuerpos, pero faltaba cerrar otra ruta:
+  detecciones donde MediaPipe ve una pose, aunque no haya evidencia suficiente
+  de atleta rojo/azul.
+- En duelo, cuando el pre-filtro por peto/casco quedaba vacio, el sistema
+  seguia con todos los candidatos crudos y el modo tolerante podia aceptar ruido.
+
+Cambio:
+
+- Nuevo helper `_candidate_athlete_evidence()`:
+  - comprueba visibilidad, area, altura, casco/peto y descarte de arbitro;
+  - produce rechazo `sin_evidencia_atleta`.
+- `_select_pose()` exige evidencia minima antes de aceptar rojo/azul.
+- `_select_duel_poses()` ya no hace fallback a candidatos crudos si no hay
+  atletas claros.
+- Cruce corporal severo pasa a rechazo duro `cuerpo_cruzado`.
+- UI reconoce `sin_evidencia_atleta` como `Sin atleta claro`.
+
+Validacion:
+
+- Corrida con `videoplayback.mp4`, `sample_every=12`, `max_frames=540`:
+  - `paired_frames`: 45;
+  - `target_coverage`: 0.083;
+  - `target_confidence`: 0.632;
+  - rechazos rojo: `sin_evidencia_atleta`, `color_insuficiente`,
+    `pose_contaminada`, `cuerpo_cruzado`;
+  - rechazos azul: `cuerpo_cruzado`, `sin_evidencia_atleta`,
+    `color_insuficiente`.
+- Keyframes limpios permanecen en tiempos ya conocidos y no se cuelan los frames
+  con cruce/ruido como destacados.
+
+Riesgo residual:
+
+- La cobertura baja en videos ruidosos. Esto es intencional para confianza de
+  demo, pero la UI debe explicar que "menos frames aceptados" significa lectura
+  mas conservadora, no fallo del sistema.
+
+## Auditoria 2026-05-27 - Keyframes Defendibles Para Demo
+
+Hallazgo:
+
+- El frame `241.67s` seguia pasando porque el ROI de cabeza capturaba rojo de
+  fondo/casco aparente y el esqueleto tenia forma colapsada.
+- Los frames `200.8s` y `289.2s` no eran necesariamente falsos como dato, pero
+  si eran malos ejemplos visuales por atleta recortado al borde.
+
+Cambio:
+
+- Validacion anatomica:
+  - `esqueleto_colapsado` cuando hombros y caderas son demasiado estrechos
+    respecto al torso;
+  - rechazo duro para rojo/azul si aparece `esqueleto_colapsado`.
+- Validacion de coherencia casco-peto:
+  - `casco_sin_peto_coherente` cuando la cabeza parece del color objetivo pero
+    el torso contradice el peto.
+- Keyframes:
+  - `_bbox_edge_margin()` calcula cercania al borde;
+  - `cuerpo_recortado` excluye frames de la galeria aunque puedan quedar como
+    dato de baja prioridad.
+- Versionado:
+  - `shape_guard_v3_2026_05_27`;
+  - la UI invalida resultados viejos y pide reanalizar.
+
+Validacion:
+
+- UI defaults: `901` frames analizados, `53` frames pareados, cobertura `0.059`,
+  confianza `0.599`.
+- Keyframes actuales: `45.4s`, `135.4s`, `152.9s`, `204.6s`, `241.2s`.
+- El frame exacto `241.67s` ya no queda como keyframe ni como par valido.
+- `200.8s` y `289.2s` quedan fuera de keyframes por cuerpo recortado.
+
+## Auditoria 2026-05-27 - Version Activa Vs Cache
+
+- Se detectaron multiples procesos escuchando en `8051`; riesgo alto de ver
+  codigo viejo o caches en memoria.
+- Se agrego `/debug/analyzer-version` para confirmar la version activa desde el
+  navegador/API.
+- Se reinicio limpio y quedo una sola instancia en `8051`.
+- La version activa confirmada es `shape_guard_v3_2026_05_27`.
+- `assets/60_pose_session_cleanup.js` limpia stores de pose cuando cambia la
+  version del analizador.
+- `signals_view.py` muestra version y keyframes renderizados en el meta del
+  resultado.
+
+Regla:
+
+- Antes de concluir que el algoritmo fallo, confirmar que el navegador no esta
+  mostrando un resultado persistido viejo.

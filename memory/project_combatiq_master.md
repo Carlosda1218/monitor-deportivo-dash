@@ -955,3 +955,59 @@ Refinamiento:
   ocluidos; ya no debe usar esos frames como imagen fuerte de demo.
 - `annotated_frames_meta` permite mostrar `t` y `score` debajo de cada frame
   seleccionado.
+
+## Estado Actualizado 2026-05-27 - Falso Positivo Sin Atleta Claro
+
+- Se cerro una segunda categoria de error biomecanico: no solo mezcla de cuerpos,
+  tambien frames donde MediaPipe detecta una pose pero no hay evidencia clara de
+  atleta rojo/azul.
+- `pose_analyzer.py` agrega `_candidate_athlete_evidence()`.
+- Rojo/azul ahora requieren evidencia minima de atleta: cuerpo visible,
+  casco/peto compatible y descarte de arbitro/ruido.
+- Si el pre-filtro de duelo no encuentra atletas claros, ya no usa candidatos
+  crudos; devuelve `sin_evidencia_atleta`.
+- Cruce corporal severo puede rechazar el frame como `cuerpo_cruzado`.
+- `views/signals_view.py` muestra el chip `Sin atleta claro`.
+
+Regla operativa:
+
+- No fabricar atletas para mantener continuidad. La continuidad temporal ayuda,
+  pero no sustituye la evidencia visual.
+- Mejor una lectura conservadora con cobertura baja que una lectura visualmente
+  convincente pero falsa.
+
+## Estado Actualizado 2026-05-27 - Keyframes Defendibles
+
+- Se agrego una capa extra para que la galeria no muestre frames debiles aunque
+  algunas mediciones todavia sean usables.
+- Nuevos conceptos:
+  - `esqueleto_colapsado`: anatomia no plausible para lectura fuerte;
+  - `casco_sin_peto_coherente`: cabeza/casco parece objetivo pero torso no
+    acompana;
+  - `cuerpo_recortado`: atleta demasiado pegado al borde.
+- `esqueleto_colapsado` rechaza el frame para rojo/azul.
+- `cuerpo_recortado` evita que el frame sea destacado visualmente.
+- Version del analizador: `shape_guard_v3_2026_05_27`.
+- Resultados antiguos en sessionStorage se invalidan y piden nuevo analisis.
+
+Regla operativa:
+
+- La galeria de momentos clave debe ser mas estricta que la serie numerica.
+- Para inversores/coaches, nunca mostrar como "mejor frame" uno recortado,
+  mezclado o dependiente de color de fondo.
+
+## Estado Actualizado 2026-05-27 - Diagnostico De Version En Vivo
+
+- Nueva ruta local: `/debug/analyzer-version`.
+- Sirve para confirmar:
+  - PID activo;
+  - archivo `pose_analyzer.py` cargado;
+  - version de `pose_analyzer`;
+  - version de `signals_view`.
+- La UI de biomecanica muestra version y tiempos de keyframes.
+- El navegador limpia stores de pose si cambia la version del analizador.
+
+Regla operativa:
+
+- Si aparecen keyframes antiguos tras modificar biomecanica, primero revisar:
+  `/debug/analyzer-version`, cantidad de procesos en `8051` y sessionStorage.

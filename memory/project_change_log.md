@@ -2240,3 +2240,167 @@ Validacion adicional:
 - `test_app_flow.py`: `28/28`.
 - `test_s105_load.py --skip-video`: OK.
 - Import app: `137 callbacks`.
+
+## 2026-05-27 - Biomecanica: Falso Positivo Sin Atleta Claro
+
+Contexto:
+
+- El usuario pregunto por que el sistema seguia diciendo que habia un atleta en
+  algunos frames donde no habia evidencia suficiente de atleta.
+- Esto no era exactamente el mismo problema que `pose_contaminada`: era un falso
+  positivo por ausencia/ruido.
+
+Causa raiz:
+
+- MediaPipe puede detectar poses en arbitros, espectadores, cuerpos parciales o
+  ruido visual.
+- En modo duelo, si el pre-filtro por peto/casco no encontraba candidatos,
+  `_select_duel_poses()` seguia usando todos los candidatos crudos.
+- En modo tolerante (`lenient=True`) los umbrales de color bajaban mucho para no
+  perder atletas reales, pero eso dejaba pasar poses sin evidencia deportiva.
+
+Correccion:
+
+- Se agrego `_candidate_athlete_evidence()` en `pose_analyzer.py`.
+- La seleccion rojo/azul ahora requiere evidencia minima de atleta:
+  - cuerpo suficientemente visible;
+  - senal de casco o peto rojo/azul;
+  - no parecer arbitro por dominio amarillo;
+  - continuidad temporal solo puede ayudar si existe senal minima.
+- Si no hay candidatos deportivos en modo duelo, ya no se cae a poses crudas:
+  retorna rechazo `sin_evidencia_atleta`.
+- Cruce corporal severo (`body_overlap >= 0.72` con baja identidad) ahora se
+  rechaza como `cuerpo_cruzado`, no solo se penaliza.
+- `views/signals_view.py` agrega chip `Sin atleta claro`.
+
+Validacion:
+
+- `compileall pose_analyzer.py views\signals_view.py`: OK.
+- `pytest -q`: `1 passed`.
+- Import app: OK, `137 callbacks`.
+- `test_app_flow.py`: `28/28`.
+- `test_s105_load.py --skip-video`: OK.
+- Prueba larga acotada con `videoplayback.mp4`, `sample_every=12`,
+  `max_frames=540`:
+  - error: `None`;
+  - frames analizados: `540`;
+  - frames pareados: `45`;
+  - confianza dual visible: `0.632`;
+  - cobertura dual: `0.083`;
+  - rechazos principales: `sin_evidencia_atleta`, `cuerpo_cruzado`,
+    `color_insuficiente`.
+  - keyframes limpios se mantienen: `48.5s`, `86.0s`, `95.0s`, `127.5s`,
+    `136.5s`, `201.0s`.
+
+Regla:
+
+- CombatIQ no debe "rellenar" atletas cuando no hay evidencia visual clara.
+- En demo/inversores, es preferible bajar cobertura y explicar baja confianza
+  antes que presentar una medicion falsa con apariencia de certeza.
+
+## 2026-05-27 - Refinamiento Anti-Falsos Positivos En Keyframes
+
+Contexto:
+
+- El usuario mostro que aun aparecian frames visualmente debiles:
+  - `241.7s`: peto rojo aceptado por contaminacion de casco/fondo;
+  - `200.8s` y `289.2s`: atletas pegados al borde de la imagen se veian poco
+    defendibles como momentos clave.
+
+Causa:
+
+- Algunas poses pasaban por senal fuerte de cabeza/casco aunque la estructura
+  corporal estaba colapsada.
+- La galeria de momentos clave no diferenciaba entre "dato usable" y "imagen
+  suficientemente limpia para demo".
+- La persistencia de resultados podia dejar visible una lectura anterior tras
+  cambiar reglas del analizador.
+
+Correccion:
+
+- `pose_analyzer.py`:
+  - nueva validacion anatomica dentro de `_target_body_consistency()`;
+  - nuevo warning/rechazo `esqueleto_colapsado`;
+  - nuevo warning `casco_sin_peto_coherente`;
+  - nuevo helper `_bbox_edge_margin()`;
+  - nuevo warning `cuerpo_recortado`;
+  - frames con cuerpo recortado no entran como keyframes destacados;
+  - `analyzer_version = shape_guard_v3_2026_05_27`.
+- `views/signals_view.py`:
+  - chips `Esqueleto dudoso`, `Casco dudoso`, `Cuerpo recortado`;
+  - invalidacion de resultados biomecanicos antiguos cuando cambia la version
+    del analizador.
+
+Validacion:
+
+- Corrida con parametros reales de UI (`target=duel`, defaults):
+  - error: `None`;
+  - frames analizados: `901`;
+  - frames pareados: `53`;
+  - confianza dual: `0.599`;
+  - cobertura dual: `0.059`;
+  - keyframes finales: `45.4s`, `135.4s`, `152.9s`, `204.6s`, `241.2s`;
+  - `200.8s` y `289.2s` ya no entran como keyframes por cuerpo recortado;
+  - el frame exacto `241.67s` queda rechazado por esqueleto/identidad.
+- Se revisaron visualmente keyframes generados; `241.2s` muestra contacto real
+  entre atletas y no es el mismo falso positivo del frame `241.67s`.
+- `compileall pose_analyzer.py views\signals_view.py`: OK.
+- `pytest -q`: OK.
+- Import app: `137 callbacks`.
+- `test_app_flow.py`: `28/28`.
+- `test_s105_load.py --skip-video`: OK.
+
+Regla:
+
+- En biomecanica hay dos niveles:
+  - dato usable para serie numerica;
+  - frame limpio para demo/galeria.
+- Un frame puede ser usable pero no debe mostrarse como imagen destacada si el
+  atleta esta recortado, contaminado o con esqueleto dudoso.
+
+## 2026-05-27 - Verificacion De Version Y Cache Biomecanica
+
+Contexto:
+
+- El usuario seguia viendo exactamente los mismos frames (`200.8s`, `241.7s`)
+  despues de los cambios.
+
+Hallazgo:
+
+- El archivo en disco tenia `shape_guard_v3_2026_05_27`, pero habia multiples
+  procesos Python escuchando en `8051`.
+- Eso podia servir codigo/cache anterior o resultados persistidos en memoria.
+- Ademas, `dcc.Store(storage_type="session")` podia conservar lecturas viejas en
+  el navegador.
+
+Correccion:
+
+- `app.py` agrega ruta local de diagnostico:
+  - `/debug/analyzer-version`;
+  - devuelve PID, archivo cargado y versiones de `pose_analyzer` y
+    `signals_view`.
+- Se reinicio limpio el puerto `8051`:
+  - queda un solo listener;
+  - PID activo verificado: `19828`;
+  - endpoint devuelve `shape_guard_v3_2026_05_27`.
+- `assets/60_pose_session_cleanup.js` ahora limpia stores biomecanicos si cambia
+  la version del analizador.
+- `views/signals_view.py` muestra en meta de la lectura:
+  - version del analizador;
+  - tiempos de keyframes renderizados.
+
+Validacion:
+
+- `/debug/analyzer-version`: OK, version `shape_guard_v3_2026_05_27`.
+- `netstat`: una sola instancia escuchando en `8051`.
+- `compileall app.py pose_analyzer.py views\signals_view.py`: OK.
+- `pytest -q`: OK.
+- `test_app_flow.py`: `28/28`.
+- `test_s105_load.py --skip-video`: OK.
+
+Regla:
+
+- Si la UI muestra frames antiguos despues de cambios de biomecanica, verificar
+  primero `/debug/analyzer-version`, procesos en `8051` y sessionStorage.
+- Los resultados persistidos deben invalidarse por version cuando cambien filtros
+  de seleccion/confianza.
