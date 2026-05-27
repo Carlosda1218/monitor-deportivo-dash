@@ -1892,3 +1892,53 @@ Refinamiento:
 - Los frames de galeria/preview deben ser limpios; si estan contaminados pueden
   afectar confianza, pero no deben presentarse como mejores ejemplos visuales.
 - La galeria dual muestra tiempo y score del frame destacado.
+
+### Actualizacion 2026-05-27 - Sin Atleta Claro
+
+- Se identifico y corrigio una causa separada de falsos positivos:
+  MediaPipe puede detectar una pose aunque no exista evidencia clara de atleta
+  rojo/azul.
+- `pose_analyzer.py` agrega `_candidate_athlete_evidence()` para exigir cuerpo
+  visible, casco/peto compatible y descarte de arbitro/ruido.
+- Si modo duelo no encuentra candidatos deportivos, ya no cae a poses crudas:
+  devuelve `sin_evidencia_atleta`.
+- Cruce corporal severo ahora puede rechazar el frame como `cuerpo_cruzado`.
+- UI muestra `Sin atleta claro`.
+
+Regla:
+
+- La app no debe decir "hay atleta" si solo hay pose generica sin evidencia de
+  combate. La cobertura puede bajar; eso es aceptable si sube la confianza.
+
+### Actualizacion 2026-05-27 - Keyframes Defendibles
+
+- Se agrego filtro anatomico para evitar falsos positivos con esqueletos
+  colapsados.
+- Nuevos avisos/rechazos:
+  - `esqueleto_colapsado`;
+  - `casco_sin_peto_coherente`;
+  - `cuerpo_recortado`.
+- `esqueleto_colapsado` rechaza frame rojo/azul.
+- `cuerpo_recortado` permite conservar datos si aplican, pero excluye el frame
+  de la galeria de demo.
+- Version actual del analizador: `shape_guard_v3_2026_05_27`.
+- La UI invalida lecturas antiguas y solicita reanalizar cuando cambia la
+  version del filtro.
+
+Regla:
+
+- Distinguir dato numerico usable de imagen fuerte para presentar.
+- Un frame puede servir como pista de serie, pero no como keyframe si se ve
+  recortado, contaminado o poco defendible.
+
+### Actualizacion 2026-05-27 - Version Activa Y Cache
+
+- Nueva ruta diagnostica: `/debug/analyzer-version`.
+- La UI muestra version del analizador y tiempos de keyframes renderizados.
+- El navegador limpia resultados de pose si cambia `shape_guard_v3_2026_05_27`.
+- Se verifico que multiples procesos en `8051` pueden explicar resultados viejos.
+
+Regla:
+
+- Antes de depurar otra vez el algoritmo, confirmar que la app en navegador esta
+  usando la version activa y no una lectura persistida.

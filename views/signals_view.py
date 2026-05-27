@@ -6909,10 +6909,18 @@ class SignalsView:
                 except Exception:
                     pass
 
+                _kf_times = ", ".join(
+                    f"{float(item.get('t', 0.0)):.1f}s"
+                    for item in (kf_meta or [])
+                    if isinstance(item, dict)
+                )
+                _version_txt = result.get("analyzer_version") or _POSE_ANALYSIS_VERSION
                 meta = html.P(
                     f"{summary.get('frames_analyzed', 0)} frames muestreados · "
                     f"{summary.get('paired_frames', len(duel_frames))} frames pareados · "
-                    f"{result.get('fps', 0)} fps originales",
+                    f"{result.get('fps', 0)} fps originales | "
+                    f"version {_version_txt}"
+                    + (f" | keyframes: {_kf_times}" if _kf_times else ""),
                     className="text-muted",
                     style={"fontSize": "11px", "marginTop": "8px"},
                 )
@@ -7231,7 +7239,8 @@ class SignalsView:
             meta = html.P(
                 f"{summary.get('frames_analyzed', 0)} frames analizados · "
                 f"{summary.get('duration_s', 0)} s · "
-                f"{result.get('fps', 0)} fps originales",
+                f"{result.get('fps', 0)} fps originales | "
+                f"version {result.get('analyzer_version') or _POSE_ANALYSIS_VERSION}",
                 className="text-muted",
                 style={"fontSize": "11px", "marginTop": "8px"},
             )
@@ -7274,10 +7283,10 @@ class SignalsView:
                     className="card",
                     style={"borderLeft": "4px solid #f0a832"},
                     children=[
-                        html.H4("Lectura biomecÇ­nica anterior", className="card-title"),
+                        html.H4("Lectura biomecánica anterior", className="card-title"),
                         html.P(
                             "Actualizamos el filtro de confianza para evitar falsos positivos de atleta. "
-                            "Ejecuta de nuevo el anÇ­lisis para regenerar frames y grÇ­ficas con la versiÇün actual.",
+                            "Ejecuta de nuevo el análisis para regenerar frames y gráficas con la versión actual.",
                             className="text-muted",
                         ),
                     ],
@@ -7665,7 +7674,7 @@ class SignalsView:
             if not pose_data:
                 return "Analiza un video primero."
             pose_data = _resolve_pose_report_data(pose_data) or pose_data
-            uid = _safe_int(session.get("id"))
+            uid = _safe_int(session.get("user_id") or session.get("id") or pose_data.get("user_id"))
             if not uid:
                 return "Inicia sesión para guardar."
             sport = (session.get("sport") or
@@ -7674,7 +7683,18 @@ class SignalsView:
                      "combate")
             filename = pose_data.get("filename") or "video"
             name = str(session_name_raw or "").strip() or filename
-            notes = f"Video: {name}"
+            summary = pose_data.get("summary") or {}
+            target_info = pose_data.get("target") or {}
+            duel = pose_data.get("duel") or (pose_data.get("biomech") or {}).get("duel") or {}
+            paired_frames = _safe_int(summary.get("paired_frames") or duel.get("frames_paired")) or 0
+            analyzed_frames = _safe_int(summary.get("frames_analyzed")) or 0
+            target_label = target_info.get("label") or "Video"
+            version = pose_data.get("analyzer_version") or _POSE_ANALYSIS_VERSION
+            notes = (
+                f"Combat Monitor | {sport} (Video) | {target_label} | "
+                f"{paired_frames} frames pareados | {analyzed_frames} frames muestreados | "
+                f"{name} | archivo {filename} | version {version}"
+            )
             try:
                 sid = db.create_session(
                     athlete_id=uid,
@@ -7682,6 +7702,10 @@ class SignalsView:
                     sport=sport,
                     notes=notes,
                 )
+                try:
+                    db.close_session(int(sid))
+                except Exception:
+                    pass
                 return f"Sesión guardada (ID {sid})."
             except Exception as exc:
                 return f"Error al guardar: {exc}"

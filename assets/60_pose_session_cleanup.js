@@ -3,7 +3,10 @@
    pero el navegador necesita retirar estas llaves para no restaurar un analisis
    anterior despues de logout. */
 (function () {
-  function clearBiomechSessionState() {
+  var CURRENT_ANALYZER_VERSION = "shape_guard_v3_2026_05_27";
+  var VERSION_KEY = "combatiq-pose-analyzer-version";
+
+  function clearBiomechSessionState(clearSelectors) {
     var exactKeys = {
       "pose-results": true,
       "pose-mediapipe-store": true,
@@ -17,8 +20,8 @@
         if (!key) continue;
         if (
           exactKeys[key] ||
-          key.indexOf("pose-target-select") !== -1 ||
-          key.indexOf("pose-num-rounds") !== -1
+          (clearSelectors && key.indexOf("pose-target-select") !== -1) ||
+          (clearSelectors && key.indexOf("pose-num-rounds") !== -1)
         ) {
           toRemove.push(key);
         }
@@ -27,6 +30,17 @@
         storage.removeItem(key);
       });
     });
+  }
+
+  function clearStaleBiomechVersion() {
+    try {
+      var stored = window.localStorage && window.localStorage.getItem(VERSION_KEY);
+      if (stored === CURRENT_ANALYZER_VERSION) return;
+      clearBiomechSessionState(false);
+      if (window.localStorage) {
+        window.localStorage.setItem(VERSION_KEY, CURRENT_ANALYZER_VERSION);
+      }
+    } catch (e) {}
   }
 
   function shouldClear() {
@@ -40,8 +54,9 @@
   }
 
   function run() {
+    clearStaleBiomechVersion();
     if (!shouldClear()) return;
-    clearBiomechSessionState();
+    clearBiomechSessionState(true);
     if (window.location.pathname === "/login" && window.history && window.history.replaceState) {
       window.history.replaceState({}, document.title, "/login");
     }

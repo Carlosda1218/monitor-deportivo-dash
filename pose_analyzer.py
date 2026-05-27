@@ -21,6 +21,7 @@ from mediapipe.tasks.python.core import base_options as base_opts
 # Ruta al modelo (debe estar junto a este archivo)
 _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pose_landmarker_lite.task")
 _logger = logging.getLogger(__name__)
+_ANALYZER_VERSION = "shape_guard_v3_2026_05_27"
 try:
     _DUEL_KEYFRAME_CANDIDATES = max(6, int(os.getenv("COMBATIQ_DUEL_KEYFRAME_CANDIDATES", "48") or 48))
 except (TypeError, ValueError):
@@ -413,6 +414,19 @@ def _target_body_consistency(
         notes.append("torso_fuera_altura_peto")
 
     torso_span = max(shoulder_span, hip_span)
+    shoulder_span_2d = float(np.linalg.norm(np.array(l_sh, dtype=float) - np.array(r_sh, dtype=float)))
+    hip_span_2d = float(np.linalg.norm(np.array(l_hp, dtype=float) - np.array(r_hp, dtype=float)))
+    torso_len = float(np.linalg.norm(np.array(shoulder_mid, dtype=float) - np.array(hip_mid, dtype=float)))
+    if torso_len > max(24.0, h * 0.055):
+        shoulder_ratio = shoulder_span_2d / max(torso_len, 1.0)
+        hip_ratio = hip_span_2d / max(torso_len, 1.0)
+        if shoulder_ratio < 0.26 and hip_ratio < 0.22:
+            quality -= 0.55
+            notes.append("esqueleto_colapsado")
+        elif shoulder_ratio < 0.34 and hip_ratio < 0.25:
+            quality -= 0.28
+            notes.append("perfil_extremo")
+
     if torso_span > vest_w * 2.65 + w * 0.045:
         quality -= 0.24
         notes.append("torso_demasiado_ancho")
@@ -420,6 +434,12 @@ def _target_body_consistency(
     if other_signal >= 0.030 and other_signal > target_signal * 0.62:
         quality -= 0.28
         notes.append("color_contrario_en_pose")
+
+    target_torso = float(colors.get(target, 0.0) or 0.0)
+    other_torso = float(colors.get(other, 0.0) or 0.0)
+    if head_target >= 0.10 and target_torso < 0.080 and other_torso >= 0.080 and other_torso > target_torso * 2.0:
+        quality -= 0.42
+        notes.append("casco_sin_peto_coherente")
 
     yellow = float(colors.get("yellow", 0.0) or 0.0)
     if yellow > max(float(colors.get(target, 0.0) or 0.0), float(colors.get(other, 0.0) or 0.0)) * 1.15 and yellow > 0.055:
@@ -578,6 +598,15 @@ def _max_candidate_overlap(candidate: dict, candidates: list[dict]) -> float:
         if other.get("idx") != idx
     ]
     return max(overlaps, default=0.0)
+
+
+def _bbox_edge_margin(candidate: dict, w: int, h: int) -> float:
+    """Normalized distance from bbox to the closest image edge."""
+    bbox = candidate.get("bbox")
+    if not bbox or w <= 0 or h <= 0:
+        return 0.0
+    x0, y0, x1, y1 = [float(v) for v in bbox]
+    return round(max(0.0, min(x0 / w, y0 / h, (w - x1) / w, (h - y1) / h)), 4)
 
 
 def _candidate_athlete_evidence(candidate: dict, target: str | None = None, *, affinity: float = 0.0) -> dict:
@@ -743,6 +772,10 @@ def _select_pose(candidates: list, target: str, track: dict | None = None, lenie
         identity_quality = max(0.0, min(1.0, identity_quality))
         chosen["identity_quality"] = round(identity_quality, 3)
         chosen["identity_notes"] = identity_notes
+        if "esqueleto_colapsado" in identity_notes:
+            chosen["selection_confidence"] = 0.0
+            chosen["rejection_reason"] = "esqueleto_colapsado"
+            return None, chosen
         if body_overlap >= 0.72 and identity_quality < 0.72:
             chosen["selection_confidence"] = 0.0
             chosen["rejection_reason"] = "cuerpo_cruzado"
@@ -1995,6 +2028,9 @@ def _analyze_video_duel(
                         identity_notes = list(selected.get("identity_notes", selected.get(f"{key}_identity_notes", [])) or [])
                         if identity_quality < 0.75:
                             validity_notes = list(validity_notes) + ["pose_contaminada"] + identity_notes[:3]
+                        edge_margin = _bbox_edge_margin(selected, w, h)
+                        if edge_margin < 0.012:
+                            validity_notes = list(validity_notes) + ["cuerpo_recortado"]
                         pose_quality = float(np.mean([1.0 if validity.get(name, True) else 0.0 for name in _L]))
                         pose_quality = min(pose_quality, max(0.25, identity_quality))
                         angles = _extract_angles(lms, w, h, validity=validity)
@@ -2030,6 +2066,7 @@ def _analyze_video_duel(
                             "identity_quality": round(identity_quality, 3),
                             "identity_warnings": identity_notes,
                             "body_overlap": round(float(selected.get("body_overlap", 0.0) or 0.0), 3),
+                            "edge_margin": edge_margin,
                             "red_score": selected.get("red_score", 0.0),
                             "blue_score": selected.get("blue_score", 0.0),
                             "cx": selected.get("cx"),
@@ -2092,6 +2129,8 @@ def _analyze_video_duel(
                             "blue_identity_quality": frame_targets["blue"]["record"].get("identity_quality", 0.0),
                             "red_body_overlap": frame_targets["red"]["record"].get("body_overlap", 0.0),
                             "blue_body_overlap": frame_targets["blue"]["record"].get("body_overlap", 0.0),
+                            "red_edge_margin": frame_targets["red"]["record"].get("edge_margin", 0.0),
+                            "blue_edge_margin": frame_targets["blue"]["record"].get("edge_margin", 0.0),
                             "red_ang_vel_max": frame_targets["red"]["record"].get("ang_vel_max", 0.0),
                             "blue_ang_vel_max": frame_targets["blue"]["record"].get("ang_vel_max", 0.0),
                         }
@@ -2114,6 +2153,9 @@ def _analyze_video_duel(
                             "pose_contaminada",
                             "cuerpo_cruzado",
                             "oclusion_parcial",
+                            "esqueleto_colapsado",
+                            "casco_sin_peto_coherente",
+                            "cuerpo_recortado",
                             "color_contrario_en_pose",
                             "casco_contrario",
                         }
@@ -2137,6 +2179,10 @@ def _analyze_video_duel(
                             and not red_bad
                             and not blue_bad
                             and max_body_overlap < 0.58
+                            and min(
+                                float(duel_frame.get("red_edge_margin", 0.0) or 0.0),
+                                float(duel_frame.get("blue_edge_margin", 0.0) or 0.0),
+                            ) >= 0.012
                         )
                         if (
                             (frame_is_clean and (not best_frame_is_clean or frame_score > best_score))
@@ -2335,6 +2381,7 @@ def _analyze_video_duel(
         "annotated_frames_meta": annotated_frames_meta,
         "time_limited": time_limited,
         "processing_s": round(time.perf_counter() - t_start, 2),
+        "analyzer_version": _ANALYZER_VERSION,
     }
 
 
@@ -2504,6 +2551,9 @@ def analyze_video(
                     identity_notes = list(selected.get("identity_notes", selected.get(f"{target_key}_identity_notes", [])) or [])
                     if target_key in ("red", "blue") and identity_quality < 0.75:
                         validity_notes = list(validity_notes) + ["pose_contaminada"] + identity_notes[:3]
+                    edge_margin = _bbox_edge_margin(selected, w, h)
+                    if target_key in ("red", "blue") and edge_margin < 0.012:
+                        validity_notes = list(validity_notes) + ["cuerpo_recortado"]
                     pose_quality = float(np.mean([1.0 if validity.get(name, True) else 0.0 for name in _L]))
                     if target_key in ("red", "blue"):
                         pose_quality = min(pose_quality, max(0.25, identity_quality))
@@ -2524,6 +2574,7 @@ def analyze_video(
                         "identity_quality": round(identity_quality, 3),
                         "identity_warnings": identity_notes,
                         "body_overlap": round(float(selected.get("body_overlap", 0.0) or 0.0), 3),
+                        "edge_margin": edge_margin,
                         **angs,
                     })
 
@@ -2640,4 +2691,5 @@ def analyze_video(
         "annotated_frame": annotated_b64,
         "time_limited":    time_limited,
         "processing_s":    round(time.perf_counter() - t_start, 2),
+        "analyzer_version": _ANALYZER_VERSION,
     }

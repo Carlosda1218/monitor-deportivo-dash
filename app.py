@@ -24,7 +24,7 @@ if _orig_rwr:
 import numpy as np
 import plotly.graph_objects as go
 
-from flask import Flask, session, request, redirect
+from flask import Flask, session, request, redirect, jsonify
 import dash
 from dash import Dash, html, dcc, Input, Output, State, callback_context, ALL
 from dash.dash_table import DataTable
@@ -116,6 +116,22 @@ def _no_cache_html(response):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
     return response
+
+
+@server.route("/debug/analyzer-version", methods=["GET"])
+def debug_analyzer_version():
+    """Tiny local diagnostic to confirm the running server loaded current code."""
+    try:
+        import pose_analyzer
+        from views import signals_view
+        return jsonify({
+            "pid": os.getpid(),
+            "pose_analyzer_file": getattr(pose_analyzer, "__file__", ""),
+            "pose_analyzer_version": getattr(pose_analyzer, "_ANALYZER_VERSION", "NO_VERSION"),
+            "signals_view_version": getattr(signals_view, "_POSE_ANALYSIS_VERSION", "NO_VERSION"),
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "pid": os.getpid()}), 500
 
 
 @server.route("/logout", methods=["GET"])
