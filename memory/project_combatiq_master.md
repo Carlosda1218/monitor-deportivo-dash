@@ -1011,3 +1011,13 @@ Regla operativa:
 
 - Si aparecen keyframes antiguos tras modificar biomecanica, primero revisar:
   `/debug/analyzer-version`, cantidad de procesos en `8051` y sessionStorage.
+
+## Estado Actualizado 2026-05-27 - Guardar Sesion De Video
+
+- `Guardar sesion de video` ya no debe pedir login cuando el usuario esta dentro.
+- Causa corregida: se usaba `session.id`, pero el login/demo trabaja con
+  `session.user_id`.
+- La sesion guardada queda cerrada y con nota `Combat Monitor`.
+- Se guarda referencia historica: deporte, objetivo, frames pareados, frames
+  muestreados, nombre, archivo y version del analizador.
+- No guarda aun el reporte visual completo; para eso se usa PDF/export.

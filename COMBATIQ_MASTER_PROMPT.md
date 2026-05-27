@@ -1942,3 +1942,15 @@ Regla:
 
 - Antes de depurar otra vez el algoritmo, confirmar que la app en navegador esta
   usando la version activa y no una lectura persistida.
+
+### Actualizacion 2026-05-27 - Guardar Sesion De Video
+
+- Se corrigio `Guardar sesion de video`.
+- Causa: el callback usaba `session.id`; login/demo usa `session.user_id`.
+- Ahora guarda una sesion historica cerrada con nota `Combat Monitor`.
+- La sesion guarda referencia/resumen del analisis, no el informe visual completo.
+
+Regla:
+
+- Para guardar el reporte completo usar PDF/export.
+- Para historial interno rapido usar `Guardar sesion de video`.

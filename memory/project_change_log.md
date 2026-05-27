@@ -2404,3 +2404,47 @@ Regla:
   primero `/debug/analyzer-version`, procesos en `8051` y sessionStorage.
 - Los resultados persistidos deben invalidarse por version cuando cambien filtros
   de seleccion/confianza.
+
+## 2026-05-27 - Fix Guardar Sesion De Video
+
+Contexto:
+
+- En la pestaña de biomecanica, despues de analizar un video, el boton
+  `Guardar sesion de video` devolvia "Inicia sesion para guardar".
+
+Causa raiz:
+
+- El callback usaba `session.get("id")`.
+- El flujo real de login/demo guarda el usuario en `session["user_id"]`.
+- Por eso la UI podia estar autenticada, pero el guardado no encontraba `uid`.
+
+Correccion:
+
+- `views/signals_view.py` ahora usa:
+  `session.get("user_id") or session.get("id") or pose_data.get("user_id")`.
+- La nota de sesion guardada ahora empieza con `Combat Monitor` y conserva
+  contexto minimo del analisis:
+  - deporte;
+  - objetivo;
+  - frames pareados;
+  - frames muestreados;
+  - nombre dado por el usuario;
+  - archivo;
+  - version del analizador.
+- La sesion se cierra despues de crearla porque es un analisis de video ya
+  completado, no una sesion en vivo abierta.
+
+Limitacion actual:
+
+- Esto guarda una referencia historica de sesion en DB, no todo el payload
+  completo de keyframes/graficas. El PDF/export sigue siendo la forma completa
+  de conservar el informe visual.
+
+Validacion:
+
+- `compileall views\signals_view.py`: OK.
+- Import app: `137 callbacks`.
+- `pytest -q`: OK.
+- `test_app_flow.py`: `28/28`.
+- `test_s105_load.py --skip-video`: OK.
+- App reiniciada en `8051`, una sola instancia activa.

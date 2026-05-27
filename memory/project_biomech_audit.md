@@ -419,3 +419,13 @@ Regla:
 
 - Antes de concluir que el algoritmo fallo, confirmar que el navegador no esta
   mostrando un resultado persistido viejo.
+
+## Auditoria 2026-05-27 - Guardado De Analisis De Video
+
+- Bug corregido: el guardado leia `session.id`, pero la app usa `session.user_id`.
+- El guardado ahora crea una sesion historica cerrada con nota `Combat Monitor`.
+- La nota contiene resumen del analisis, pero no persiste todavia frames/base64 ni
+  graficas completas.
+- Pendiente futuro: tabla dedicada `video_analysis_reports` o cache persistente
+  por `video_hash + analyzer_version + parametros` si queremos reabrir el
+  analisis completo sin recalcular.

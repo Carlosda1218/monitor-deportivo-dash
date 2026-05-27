@@ -1147,3 +1147,10 @@ Control de version/cache:
 - Completado reinicio limpio de puerto `8051` con una sola instancia.
 - Completado auto-clear de stores biomecanicos por version en navegador.
 - Completado meta visible de version + keyframes en la lectura.
+
+Fix adicional:
+
+- `Guardar sesion de video` corregido.
+- La sesion historica queda cerrada con nota `Combat Monitor`.
+- Pendiente futuro: persistir reporte biomecanico completo por hash/version si
+  queremos abrirlo sin recalcular.
