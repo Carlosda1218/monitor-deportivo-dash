@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Technical Overview — CombatIQ</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 11pt;
+      color: #2c2c2c;
+      background: #ffffff;
+      line-height: 1.65;
+    }
+
+    /* ── Page wrapper ─────────────────────────────────────────────── */
+    .page {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 64px 60px 80px;
+    }
+
+    /* ── Cover ────────────────────────────────────────────────────── */
+    .cover {
+      text-align: center;
+      padding: 90px 0 80px;
+    }
+    .cover h1 {
+      font-size: 42pt;
+      font-weight: 900;
+      color: #1a3fa8;
+      letter-spacing: -1px;
+      margin-bottom: 10px;
+    }
+    .cover .subtitle {
+      font-size: 18pt;
+      color: #3a3a3a;
+      font-weight: 400;
+      margin-bottom: 40px;
+    }
+    .cover .meta {
+      font-size: 10pt;
+      color: #888;
+    }
+    .cover .meta strong {
+      color: #444;
+    }
+
+    /* ── Section divider ──────────────────────────────────────────── */
+    .divider {
+      border: none;
+      border-top: 1.5px solid #d8dce8;
+      margin: 36px 0;
+    }
+
+    /* ── Section headings ─────────────────────────────────────────── */
+    h2 {
+      font-size: 15pt;
+      font-weight: 800;
+      color: #1a3fa8;
+      margin-bottom: 14px;
+      margin-top: 42px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    h3 {
+      font-size: 11.5pt;
+      font-weight: 700;
+      color: #1a3fa8;
+      margin-top: 22px;
+      margin-bottom: 6px;
+    }
+    h4 {
+      font-size: 10.5pt;
+      font-weight: 700;
+      color: #1e1e2e;
+      margin-top: 14px;
+      margin-bottom: 4px;
+    }
+
+    /* ── Body text ────────────────────────────────────────────────── */
+    p {
+      margin-bottom: 10px;
+    }
+
+    /* ── Lists ────────────────────────────────────────────────────── */
+    ul, ol {
+      padding-left: 22px;
+      margin-bottom: 10px;
+    }
+    li {
+      margin-bottom: 5px;
+    }
+
+    /* ── Tables ───────────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 20px;
+      font-size: 10pt;
+    }
+    thead tr {
+      background: #1a3fa8;
+      color: #ffffff;
+    }
+    thead th {
+      padding: 9px 12px;
+      text-align: left;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    tbody tr:nth-child(odd)  { background: #f0f3fb; }
+    tbody tr:nth-child(even) { background: #ffffff; }
+    tbody td {
+      padding: 8px 12px;
+      vertical-align: top;
+      border-bottom: 1px solid #dde2ee;
+    }
+
+    /* ── Diagram box ──────────────────────────────────────────────── */
+    .diagram {
+      background: #f0f3fb;
+      border: 1.5px solid #c5cde8;
+      border-radius: 8px;
+      padding: 24px 28px;
+      font-family: "Courier New", monospace;
+      font-size: 9.5pt;
+      color: #1e2a4a;
+      line-height: 1.9;
+      margin: 14px 0 20px;
+      white-space: pre;
+    }
+
+    /* ── Code / label pill ────────────────────────────────────────── */
+    code {
+      background: #eef1fb;
+      border: 1px solid #c8d0ea;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: "Courier New", monospace;
+      font-size: 9.5pt;
+      color: #1a3fa8;
+    }
+
+    /* ── Alert / note box ─────────────────────────────────────────── */
+    .note {
+      background: #fff8e1;
+      border-left: 4px solid #fbc02d;
+      padding: 10px 16px;
+      border-radius: 4px;
+      font-size: 10pt;
+      margin: 10px 0 18px;
+    }
+
+    /* ── Print ────────────────────────────────────────────────────── */
+    @media print {
+      .page { padding: 40px 50px; }
+      h2 { page-break-before: always; }
+      h2:first-of-type { page-break-before: avoid; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ══════════════ COVER ══════════════ -->
+  <div class="cover">
+    <h1>CombatIQ</h1>
+    <div class="subtitle">Technical Overview</div>
+    <div class="meta">
+      Versión 1.0 · Mayo 2026<br><br>
+      <strong>Plataforma de Monitoreo para Deportes de Combate</strong>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 1. SYSTEM OVERVIEW ══════════════ -->
+  <h2>1. System Overview</h2>
+
+  <p>
+    CombatIQ es una plataforma web de monitoreo del rendimiento diseñada para deportistas
+    y coaches de artes marciales de combate (Taekwondo y Boxeo). Integra datos biomédicos
+    de sensores, check-ins de bienestar subjetivo e inteligencia artificial en un único sistema
+    multi-rol accesible desde cualquier navegador.
+  </p>
+
+  <h3>Funcionalidades Principales</h3>
+  <ul>
+    <li><strong>Monitoreo de señales biomédicas</strong> — análisis de ECG/HRV (frecuencia cardíaca y variabilidad) e IMU (detección de golpes, patadas e impactos recibidos).</li>
+    <li><strong>Check-in de bienestar inteligente</strong> — cuestionarios ponderados por deporte que calculan un <em>Wellness Score</em> (0–100) pre-entrenamiento.</li>
+    <li><strong>Dashboard del coach</strong> — vista de equipo en tiempo real con alertas automáticas, historial de sesiones y métricas de carga.</li>
+    <li><strong>Análisis de carga interna y externa</strong> — ACWR (ratio carga aguda:crónica), readiness HRV, tendencias de volumen IMU y alertas por niveles (ok / warning / danger).</li>
+    <li><strong>Insights narrativos con IA</strong> — integración con la API de Claude (Anthropic) que genera análisis de coaching contextualizados al deporte y a los datos del atleta.</li>
+  </ul>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 2. ARQUITECTURA ══════════════ -->
+  <h2>2. Arquitectura del Sistema</h2>
+
+  <div class="diagram">┌──────────────────────────────────────────────────────────────────┐
+│                         USUARIO                                  │
+│         Navegador Web (Chrome / Safari / Firefox)                │
+│                 Compatible con PWA (instalable)                  │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │  HTTP / HTTPS
+┌────────────────────────────▼─────────────────────────────────────┐
+│                         FRONTEND                                 │
+│      Plotly Dash (Python) + CSS personalizado + JavaScript       │
+│  Layouts reactivos multi-rol · Gráficas interactivas · DataTable │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │  Callbacks (Dash) + Rutas (Flask)
+┌────────────────────────────▼─────────────────────────────────────┐
+│                         BACKEND                                  │
+│             Flask (Python) + Dash Server                         │
+│  Autenticación · Sesiones Flask · API REST interna · Archivos    │
+│  analysis_engine.py · ai_insights.py (Claude API)               │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │  SQL (sqlite3)
+┌────────────────────────────▼─────────────────────────────────────┐
+│                      BASE DE DATOS                               │
+│           SQLite — data/users.db — modo WAL                      │
+│     20+ tablas · Migraciones versionadas (v10 → v210)           │
+└──────────────────────────────────────────────────────────────────┘</div>
+
+  <table>
+    <thead>
+      <tr><th>Capa</th><th>Tecnología</th><th>Responsabilidad</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Usuario</strong></td>
+        <td>Navegador web / PWA</td>
+        <td>Interfaz visual, instalable en móvil como Progressive Web App</td>
+      </tr>
+      <tr>
+        <td><strong>Frontend</strong></td>
+        <td>Plotly Dash 2.16, Plotly 6.4, CSS propio, JavaScript</td>
+        <td>Componentes reactivos, gráficas biomédicas, DataTables, sliders de check-in</td>
+      </tr>
+      <tr>
+        <td><strong>Backend</strong></td>
+        <td>Flask 3.0, Python 3.11+</td>
+        <td>Servidor WSGI, gestión de sesiones, autenticación bcrypt, rutas REST API, carga de archivos</td>
+      </tr>
+      <tr>
+        <td><strong>Base de datos</strong></td>
+        <td>SQLite (WAL mode)</td>
+        <td>Persistencia de usuarios, métricas, cuestionarios, sesiones; migraciones automáticas al arrancar</td>
+      </tr>
+      <tr>
+        <td><strong>IA externa</strong></td>
+        <td>Anthropic Claude API (<code>anthropic==0.96</code>)</td>
+        <td>Generación de notas narrativas de coaching basadas en el informe del atleta</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 3. COMPONENTES ══════════════ -->
+  <h2>3. Componentes del Sistema</h2>
+
+  <h4>app.py</h4>
+  <p>
+    Punto de entrada principal. Inicializa el servidor Flask y la instancia Dash, registra
+    el layout base multi-rol (deportista / coach) y define todos los callbacks reactivos.
+    Gestiona la autenticación, la navegación entre páginas y orquesta las cuatro vistas
+    modulares: <code>SignalsView</code>, <code>SensorsView</code>, <code>CompareView</code>
+    y <code>AnalysisView</code>. También expone los endpoints REST internos
+    (<code>/api/sensor-data</code>, <code>/api/sensor-ping</code>) para ingestión de datos
+    desde dispositivos externos.
+  </p>
+
+  <h4>db.py</h4>
+  <p>
+    Capa completa de acceso a datos. Define todas las tablas SQLite y ejecuta migraciones
+    versionadas de la v10 a la v210 de forma automática e idempotente al arrancar la app.
+    Expone funciones CRUD para: usuarios, sesiones de entrenamiento, cuestionarios,
+    métricas de sensores (ECG, IMU, EMG, RESP), equipos, mensajes internos, peso,
+    nutrición y recuperación de contraseña mediante tokens temporales.
+  </p>
+
+  <h4>sensors.py</h4>
+  <p>
+    Catálogo declarativo de los sensores del sistema. Cada entrada define nombre,
+    señales que produce, métricas calculadas, compatibilidad por deporte y ejemplos
+    de hardware. Los sensores activos son:
+  </p>
+  <table>
+    <thead>
+      <tr><th>Código</th><th>Sensor</th><th>Deporte</th><th>Métricas clave</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>ECG</code></td><td>Banda torácica ECG / HRV</td><td>TKD · Boxeo</td><td>BPM, SDNN, RMSSD, n_peaks</td></tr>
+      <tr><td><code>IMU_WRIST</code></td><td>IMU muñeca / guante</td><td>TKD · Boxeo</td><td>golpes totales, golpes/min, intensidad media (g), intensidad máxima (g)</td></tr>
+      <tr><td><code>IMU_FOOT</code></td><td>IMU tobillo / pie</td><td>TKD</td><td>patadas totales, patadas/min, potencia (g), ratio dom./no-dom.</td></tr>
+      <tr><td><code>IMU_HEAD</code></td><td>IMU casco / cabeza</td><td>TKD · Boxeo</td><td>impactos recibidos, pico de g, impactos &gt;3 g, impactos &gt;6 g</td></tr>
+      <tr><td><code>HR_WRIST</code></td><td>FC desde reloj / pulsera</td><td>TKD · Boxeo</td><td>BPM (promedio, máximo)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>questionnaires.py</h4>
+  <p>
+    Define 22 preguntas organizadas en 7 grupos temáticos: <em>base</em>, <em>taekwondo</em>,
+    <em>boxeo</em>, <em>competencia</em>, <em>peso</em> y <em>molestia</em>. Cada pregunta
+    tiene un peso numérico (3–14) y una dimensión (<em>positive</em> o <em>risk</em>).
+    El módulo implementa el algoritmo de cálculo del <strong>Wellness Score (0–100)</strong>:
+    normaliza cada respuesta al rango 0–100, invierte las dimensiones de riesgo y pondera
+    cada ítem según su peso relativo al sport del atleta.
+  </p>
+
+  <h4>analysis_engine.py</h4>
+  <p>
+    Motor de análisis que agrega datos históricos del atleta y genera un informe estructurado.
+    Calcula: ACWR (ratio carga aguda:crónica de las últimas 7 vs 28 sesiones), readiness HRV
+    comparada contra la baseline rolling de 30 días, tendencias de volumen IMU y el listado
+    de alertas automáticas clasificadas por nivel (<em>ok</em>, <em>warning</em>, <em>danger</em>).
+    Incluye caché en memoria con TTL de 5 minutos para no recalcular en cada renderizado.
+  </p>
+
+  <h4>ai_insights.py</h4>
+  <p>
+    Integración con la API de Claude de Anthropic. Recibe el informe del
+    <code>analysis_engine</code> y genera un análisis narrativo de coaching adaptado
+    al deporte y al momento de la temporada. Implementa caché en memoria (10 min),
+    timeout configurable (defecto 8 s) y degradación elegante: si no hay API key o
+    falla la llamada, retorna un mensaje de aviso sin romper la UI.
+  </p>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 4. FLUJO DE DATOS ══════════════ -->
+  <h2>4. Flujo de Datos</h2>
+
+  <h3>Flujo 1: Check-in de bienestar (deportista)</h3>
+  <ol>
+    <li>El deportista autenticado navega a la página <code>/wellbeing</code>.</li>
+    <li>El layout detecta su deporte (<code>users.sport</code>) y muestra solo las preguntas relevantes (preguntas base + grupo específico del deporte).</li>
+    <li>El deportista responde los sliders de 1–5 (energía, recuperación, sueño, fatiga, etc.) y registra RPE y duración de la sesión anterior.</li>
+    <li><code>questionnaires.compute_wellness_score(answers, sport)</code> normaliza cada respuesta a 0–100, invierte las dimensiones de riesgo y aplica los pesos configurados.</li>
+    <li>El score final (0–100) y el JSON de respuestas se persisten en la tabla <code>questionnaires</code> junto al <code>user_id</code>, timestamp y <code>session_id</code>.</li>
+    <li><code>analysis_engine.invalidate_cache(uid)</code> limpia el caché del atleta.</li>
+    <li>El dashboard del coach actualiza la vista del equipo: el wellness del atleta aparece con su nivel de color (verde / naranja / rojo).</li>
+    <li>Si <code>ANTHROPIC_API_KEY</code> está configurada, <code>ai_insights.generate_coaching_note(report, athlete_name, sport)</code> devuelve el análisis narrativo visible para el coach.</li>
+  </ol>
+
+  <h3>Flujo 2: Análisis de señal ECG</h3>
+  <ol>
+    <li>El coach o deportista sube el CSV de la banda torácica en la vista <strong>Signals</strong>.</li>
+    <li>El backend lee el archivo, detecta la frecuencia de muestreo y registra el archivo en <code>ecg_files</code>.</li>
+    <li><code>analysis_engine</code> carga las muestras y aplica <code>scipy.signal.find_peaks()</code> para detectar los picos R.</li>
+    <li>Se calculan los intervalos R–R y a partir de ellos: BPM, SDNN y RMSSD.</li>
+    <li>Las métricas se guardan en <code>ecg_metrics</code> vinculadas al <code>ecg_file_id</code> y <code>session_id</code>.</li>
+    <li>La vista <strong>Signals</strong> renderiza la señal ECG en tiempo real con los picos marcados y las métricas en tarjetas de resumen.</li>
+  </ol>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 5. MODELO DE DATOS ══════════════ -->
+  <h2>5. Modelo de Datos</h2>
+
+  <h3>Tablas principales</h3>
+
+  <table>
+    <thead>
+      <tr><th>Tabla</th><th>Columnas clave</th><th>Descripción</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>users</code></td>
+        <td>id, name, email, role, sport, password_hash, coach_id, avatar_url, onboarding_done</td>
+        <td>Usuarios del sistema. Roles: <em>deportista</em> / <em>coach</em>. <code>coach_id</code> enlaza atleta con su coach (legacy).</td>
+      </tr>
+      <tr>
+        <td><code>questionnaires</code></td>
+        <td>id, user_id, ts, answers_json, wellness_score, rpe, duration_min, session_id</td>
+        <td>Check-ins diarios. <code>answers_json</code> guarda las respuestas completas; <code>wellness_score</code> es el valor ponderado 0–100.</td>
+      </tr>
+      <tr>
+        <td><code>sessions</code></td>
+        <td>id, athlete_id, created_by, ts_start, ts_end, sport, notes, status</td>
+        <td>Sesiones de entrenamiento. Agrupa ECG, IMU y cuestionario bajo una misma entidad temporal.</td>
+      </tr>
+      <tr>
+        <td><code>ecg_files</code></td>
+        <td>id, user_id, filename, fs, created_at, session_id</td>
+        <td>Archivos CSV de señal ECG cargados. <code>fs</code> = frecuencia de muestreo en Hz.</td>
+      </tr>
+      <tr>
+        <td><code>ecg_metrics</code></td>
+        <td>id, ecg_file_id, bpm, sdnn, rmssd, n_peaks, created_at</td>
+        <td>Métricas calculadas sobre cada archivo ECG. Relación 1:N con <code>ecg_files</code>.</td>
+      </tr>
+      <tr>
+        <td><code>imu_metrics</code></td>
+        <td>id, user_id, filename, ts, n_hits, hits_per_min, mean_int_g, max_int_g, sensor_type, mean_ang_vel, max_ang_vel, session_id</td>
+        <td>Métricas de impacto de cada sensor IMU. <code>sensor_type</code> indica muñeca, pie o cabeza.</td>
+      </tr>
+      <tr>
+        <td><code>coach_athletes</code></td>
+        <td>coach_id, athlete_id, created_at</td>
+        <td>Relación de adopción coach–atleta (modelo nuevo). Complementa el <code>coach_id</code> legacy en <code>users</code>.</td>
+      </tr>
+      <tr>
+        <td><code>teams</code> / <code>team_members</code></td>
+        <td>team_id, coach_id, name, sport / team_id, athlete_id, role_label</td>
+        <td>Gestión de equipos. Un coach puede tener múltiples equipos con atletas asignados.</td>
+      </tr>
+      <tr>
+        <td><code>weights</code></td>
+        <td>id, user_id, date, weight_kg, target_kg</td>
+        <td>Historial de peso del atleta, con peso objetivo para control de categoría.</td>
+      </tr>
+      <tr>
+        <td><code>messages</code></td>
+        <td>id, sender_id, receiver_id, body, ts, read_at</td>
+        <td>Chat interno coach–atleta. <code>read_at</code> permite saber si el mensaje fue leído.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Relación entre tablas principales</h3>
+  <p>
+    Un <code>usuario</code> (role=<em>deportista</em>) pertenece a un <code>coach</code> vía
+    <code>coach_athletes</code> (relación de adopción) o por el campo legacy <code>users.coach_id</code>.
+    Cada <code>session</code> agrupa las métricas de la sesión: enlaza con <code>ecg_files</code>,
+    <code>imu_metrics</code>, <code>questionnaires</code> y <code>sensor_sessions</code> mediante
+    <code>session_id</code>.
+  </p>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 6. PROCESAMIENTO BIOMÉDICO ══════════════ -->
+  <h2>6. Procesamiento Biomédico</h2>
+
+  <h3>Señal ECG (electrocardiograma)</h3>
+
+  <table>
+    <thead>
+      <tr><th>Parámetro</th><th>Significado</th><th>Cálculo</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>BPM</strong></td>
+        <td>Frecuencia cardíaca (latidos por minuto)</td>
+        <td>Se detectan los picos R con <code>scipy.signal.find_peaks()</code> sobre la señal filtrada. BPM = 60 / media(intervalos R–R en segundos).</td>
+      </tr>
+      <tr>
+        <td><strong>SDNN</strong></td>
+        <td>Variabilidad de la frecuencia cardíaca (HRV global)</td>
+        <td>Desviación estándar de todos los intervalos R–R de la grabación. Valores bajos indican fatiga acumulada.</td>
+      </tr>
+      <tr>
+        <td><strong>RMSSD</strong></td>
+        <td>HRV de corto plazo (actividad parasimpática)</td>
+        <td>Raíz cuadrada del promedio de los cuadrados de las diferencias entre intervalos R–R consecutivos. Indicador de recuperación autonómica.</td>
+      </tr>
+      <tr>
+        <td><strong>n_peaks</strong></td>
+        <td>Total de latidos detectados</td>
+        <td>Contador de picos R identificados en el segmento analizado. Sirve para validar la calidad de la señal.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Señal IMU (unidad de medición inercial)</h3>
+
+  <table>
+    <thead>
+      <tr><th>Parámetro</th><th>Significado</th><th>Cálculo</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>n_hits</strong></td>
+        <td>Número total de golpes / patadas / impactos</td>
+        <td>Se calcula la magnitud vectorial de la aceleración: √(ax² + ay² + az²). Los picos que superan un umbral de detección (≥ 2 g) se cuentan como impactos.</td>
+      </tr>
+      <tr>
+        <td><strong>hits_per_min</strong></td>
+        <td>Cadencia (golpes por minuto)</td>
+        <td>n_hits / duración de la grabación en minutos. Indicador de volumen de trabajo específico.</td>
+      </tr>
+      <tr>
+        <td><strong>mean_int_g / max_int_g</strong></td>
+        <td>Intensidad media y máxima del impacto</td>
+        <td>Valor de pico de la magnitud vectorial en cada impacto detectado, expresado en g (gravedades). La media mide la intensidad sostenida; el máximo detecta golpes de alta potencia.</td>
+      </tr>
+      <tr>
+        <td><strong>mean_ang_vel / max_ang_vel</strong></td>
+        <td>Velocidad angular media y máxima</td>
+        <td>Derivada del giroscopio triaxial. Cuantifica la rapidez de rotación del segmento corporal durante el impacto (relevante para técnicas giratorias en TKD).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <strong>Nota:</strong> La ingestión de sensores acepta tres modalidades: (1) carga manual de CSV/JSON desde la UI,
+    (2) POST al endpoint <code>/api/sensor-data</code> desde hardware externo, y (3) BLE a través
+    de un hub Nordic UART (en desarrollo activo).
+  </div>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 7. LIMITACIONES ══════════════ -->
+  <h2>7. Limitaciones</h2>
+  <ol>
+    <li><strong>Base de datos SQLite:</strong> concurrencia limitada bajo cargas altas simultáneas (múltiples coaches + atletas en la misma instancia). El modo WAL mejora la situación pero no la elimina.</li>
+    <li><strong>Sin integración BLE en tiempo real:</strong> la ingestión de ECG e IMU es mayoritariamente manual (CSV/JSON upload). El hub BLE Nordic está en fase de prototipo.</li>
+    <li><strong>Sin app móvil nativa:</strong> la plataforma es solo web (PWA instalable). No existe versión iOS o Android en tiendas de aplicaciones.</li>
+    <li><strong>Insights de IA opcionales:</strong> requieren <code>ANTHROPIC_API_KEY</code> activa. Sin ella la sección de análisis narrativo no se muestra, pero el resto del sistema funciona sin modificaciones.</li>
+    <li><strong>Análisis biomecánico por video (YOLO / MediaPipe) es computacionalmente intenso:</strong> no es apto para servidores de bajo costo o entornos sin GPU. Las estimaciones de pose se realizan en modo <em>offline</em> sobre archivos de video previamente grabados.</li>
+  </ol>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 8. MEJORAS ══════════════ -->
+  <h2>8. Mejoras</h2>
+
+  <h3>Arquitectura</h3>
+  <p>
+    Migrar a una arquitectura <strong>API REST + SPA</strong> (FastAPI en backend,
+    React o Vue en frontend) para desacoplar las capas y escalar cada una de forma
+    independiente. Introducir <strong>Redis</strong> como caché compartida para los
+    informes del <code>analysis_engine</code>, eliminando el caché en memoria
+    no compartido entre procesos.
+  </p>
+
+  <h3>Base de datos</h3>
+  <p>
+    Migrar de SQLite a <strong>PostgreSQL</strong> cuando el número de atletas activos
+    supere los 300 o cuando se despliegue en producción con múltiples coaches concurrentes.
+    Adoptar <strong>SQLAlchemy</strong> como ORM para simplificar las migraciones
+    (Alembic) y mejorar la cobertura de tests. Mantener la capa de migraciones versionadas
+    que ya existe en <code>db.py</code> para una transición sin pérdida de datos.
+  </p>
+
+  <h3>Funcionalidad</h3>
+  <p>
+    Integración BLE en tiempo real con transmisión de datos desde sensores wearables
+    directamente a la plataforma sin pasos manuales de carga. Notificaciones push
+    al móvil del coach cuando un atleta registra un wellness score bajo o un
+    impacto de alto riesgo. App móvil nativa (React Native) para el check-in
+    diario del deportista sin necesidad de abrir el navegador.
+  </p>
+
+  <hr class="divider">
+
+  <!-- ══════════════ 9. CONCLUSIONES ══════════════ -->
+  <h2>9. Conclusiones</h2>
+
+  <h3>Qué has aprendido</h3>
+  <ul>
+    <li>Cómo construir un sistema web multi-rol real (coach / deportista) con autenticación segura (bcrypt + tokens de sesión), navegación protegida y separación de permisos por rol.</li>
+    <li>Procesamiento de señales biomédicas en Python: detección de picos R en ECG con scipy, cálculo de parámetros HRV (SDNN, RMSSD) y detección de impactos en señales IMU triaxiales.</li>
+    <li>Diseño de un esquema de base de datos evolutivo con migraciones versionadas que permiten añadir funcionalidades en producción sin perder datos existentes.</li>
+    <li>Integración de modelos de IA generativa (Claude API) en el flujo de datos de una aplicación real, con manejo de errores, caché y degradación elegante cuando el servicio no está disponible.</li>
+    <li>Patrones de arquitectura reactiva con Plotly Dash: cómo estructurar callbacks complejos con múltiples inputs/outputs, estados compartidos y componentes dinámicos por deporte.</li>
+  </ul>
+
+  <h3>Qué mejorarías</h3>
+  <ul>
+    <li>Separar el frontend del backend desde el inicio (API REST + cliente independiente) para facilitar el testing y la escala horizontal.</li>
+    <li>Implementar WebSockets (o Server-Sent Events) para que el dashboard del coach se actualice en tiempo real sin necesidad de recargar la página.</li>
+    <li>Añadir una suite de tests automatizados (pytest + coverage) desde el primer día, especialmente para el algoritmo del Wellness Score y el pipeline de análisis ECG/IMU.</li>
+    <li>Usar PostgreSQL desde el despliegue inicial en lugar de migrar después, para evitar el trabajo de conversión de datos en producción.</li>
+  </ul>
+
+  <hr class="divider">
+
+  <p style="text-align:center; font-size:9pt; color:#999; margin-top:30px;">
+    Documento elaborado en mayo de 2026 · CombatIQ — Plataforma de Monitoreo para Deportes de Combate
+  </p>
+
+</div>
+</body>
+</html>

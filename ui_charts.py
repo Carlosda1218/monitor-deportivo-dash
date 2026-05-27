@@ -290,5 +290,39 @@ def graph_config() -> dict:
     return {
         "displayModeBar": False,
         "responsive": True,
-        "scrollZoom": True,
+        "scrollZoom": False,
     }
+
+
+def placeholder_figure(height: int = 360) -> dict:
+    """Dict plano para dcc.Graph en layouts — cero overhead Plotly en server.
+    Usa empty_figure() solo en callbacks donde necesites mostrar mensaje estilizado."""
+    return {
+        "data": [],
+        "layout": {
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "height": height,
+            "margin": {"l": 40, "r": 18, "t": 48, "b": 40},
+            "xaxis": {"visible": False},
+            "yaxis": {"visible": False},
+        },
+    }
+
+
+def empty_figure(title: str = "", message: str = "Sin datos", height: int = 360) -> go.Figure:
+    """Figura vacía con mensaje centrado — usada como valor inicial en dcc.Graph."""
+    fig = go.Figure()
+    apply_chart_style(fig, height=height)
+    if title:
+        fig.update_layout(title_text=title)
+    fig.add_annotation(
+        text=message,
+        showarrow=False,
+        x=0.5, y=0.5,
+        xref="paper", yref="paper",
+        font=dict(size=13, color="#8fa3bf"),
+    )
+    fig.update_xaxes(showgrid=False, showticklabels=False, zeroline=False)
+    fig.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
+    return fig

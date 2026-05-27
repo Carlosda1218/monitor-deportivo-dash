@@ -1,0 +1,9 @@
+{
+  "created_at": "2026-05-15",
+  "action": "removed duplicate legacy uploads after confirming identical sha256 hashes",
+  "canonical_file": "data/uploads_legacy/20260503_005430.mp4",
+  "deleted_duplicates": 16,
+  "freed_bytes": 954540880,
+  "freed_mb": 910.32,
+  "compatibility_aliases": "data/upload_aliases.json"
+}

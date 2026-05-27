@@ -1,6 +1,29 @@
-﻿from dash import html, dcc, Input, Output, State, callback
-from flask import session
+﻿import time
+from collections import defaultdict
+
+from dash import html, dcc, Input, Output, State, callback
+from flask import session, request as _flask_request
 import db
+
+# ── Rate limiting: máx. 10 registros por IP en 1 hora ─────────────────────────
+_REG_MAX = 10
+_REG_WIN = 60 * 60
+
+_reg_attempts: dict = defaultdict(list)
+
+
+def _reg_rate_check(ip: str) -> tuple:
+    now    = time.monotonic()
+    recent = [t for t in _reg_attempts[ip] if t > now - _REG_WIN]
+    _reg_attempts[ip] = recent
+    if len(recent) >= _REG_MAX:
+        wait = int(_REG_WIN - (now - min(recent))) + 1
+        return True, wait
+    return False, 0
+
+
+def _reg_rate_record(ip: str) -> None:
+    _reg_attempts[ip].append(time.monotonic())
 
 DEPORTES = ["Taekwondo", "Box"]
 SYMS = "!@#$%^&*()-_=+[]{};:'\",.<>/?\\|`~"
@@ -43,7 +66,7 @@ layout = html.Div(className="auth-wrap", children=[
     html.Div(className="auth-left", children=[
         html.Div(className="auth-left__brand", children=[
             html.Div(className="auth-left__mark", children=[
-                html.Img(src="/assets/logo_powersync.svg", className="auth-left__logo"),
+                html.Img(src="/assets/logo_combatiq.svg", className="auth-left__logo"),
             ]),
             html.Div([
                 html.Div("CombatIQ", className="auth-left__name"),
@@ -57,7 +80,7 @@ layout = html.Div(className="auth-wrap", children=[
             ], className="auth-left__headline"),
             html.P(
                 "Registra sesiones, monitorea bienestar y analiza tu carga semanal. "
-                "Diseñado para atletas de combate y sus coaches.",
+                "Diseñado para atletas de taekwondo y boxeo, y sus coaches.",
                 className="auth-left__sub",
             ),
             html.Div(className="auth-left__features", children=[
@@ -79,7 +102,7 @@ layout = html.Div(className="auth-wrap", children=[
                 ]),
             ]),
         ]),
-        html.Div("© 2025 CombatIQ", className="auth-left__footer"),
+        html.Div("© 2026 CombatIQ", className="auth-left__footer"),
     ]),
 
     # Panel derecho — Formulario
@@ -107,7 +130,7 @@ layout = html.Div(className="auth-wrap", children=[
             dcc.Input(id="reg-pass", type="password", placeholder="Mínimo 8 caracteres"),
             html.Div(className="pw-strength-track", children=[
                 html.Div(id="pw-bar", className="pw-strength-bar",
-                         style={"width": "0%", "background": "#2b3a52"}),
+                         style={"width": "0%", "background": "var(--line)"}),
             ]),
             html.Div(id="pw-label", className="pw-strength-label"),
         ]),
@@ -133,7 +156,7 @@ layout = html.Div(className="auth-wrap", children=[
                 ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Deporte / Arte marcial"),
+                html.Label("Deporte"),
                 dcc.Dropdown(
                     id="reg-sport",
                     options=[{"label": d, "value": d} for d in DEPORTES]
@@ -162,14 +185,19 @@ layout = html.Div(className="auth-wrap", children=[
         html.Div(id="reg-redirect"),
 
         html.Div(className="auth-switch", children=[
-            "¿Ya tienes cuenta? ", html.A("Inicia sesión", href="/login"),
+            "¿Ya tienes cuenta? ", dcc.Link("Inicia sesión", href="/login"),
         ]),
         ]),  # auth-card
     ]),      # auth-right
 ])
 
 
-@callback(Output("pw-bar", "style"), Output("pw-label", "children"), Input("reg-pass", "value"))
+@callback(
+    Output("pw-bar", "style"),
+    Output("pw-label", "children"),
+    Input("reg-pass", "value"),
+    prevent_initial_call=True,
+)
 def update_pw_strength(pw):
     score = strength_score(pw or "")
     label, color, pct = strength_label_color(score)
@@ -184,7 +212,11 @@ def update_pw_strength(pw):
     return style, f"{label} ({pct}%) {hint}"
 
 
-@callback(Output("reg-sport-custom-box", "style"), Input("reg-sport", "value"))
+@callback(
+    Output("reg-sport-custom-box", "style"),
+    Input("reg-sport", "value"),
+    prevent_initial_call=True,
+)
 def toggle_custom_sport(selected):
     return {"display": "block", "marginTop": "8px"} if selected == "OTRA" else {"display": "none"}
 
@@ -203,6 +235,12 @@ def toggle_custom_sport(selected):
     prevent_initial_call=True
 )
 def do_register(n, name, email, pw, pw2, role, sport, sport_custom):
+    ip = (_flask_request.remote_addr or "unknown")
+    blocked, wait = _reg_rate_check(ip)
+    if blocked:
+        mins = wait // 60
+        return f"Demasiados registros desde tu conexión. Espera {mins} min.", None
+
     if not all([name, email, pw, pw2, role]):
         return "Falta completar campos obligatorios (nombre, correo, contraseña, confirmar, rol).", None
 
@@ -225,12 +263,17 @@ def do_register(n, name, email, pw, pw2, role, sport, sport_custom):
     try:
         db.create_user(name, email_clean, pw, role, sport)
     except Exception as e:
-        return f"Error: {e}", None
+        if "UNIQUE constraint" in str(e):
+            return "Este correo ya está registrado.", None
+        return "Error al crear la cuenta. Intenta de nuevo.", None
 
+    _reg_rate_record(ip)
     user = db.get_user_by_email(email_clean)
+    if not user:
+        return "Cuenta creada. Inicia sesión para continuar.", dcc.Location(pathname="/login", id="redirect-register")
     session["user_id"] = user["id"]
     session["role"] = user["role"] or "deportista"
     session["name"] = user["name"] or ""
     session["sport"] = user["sport"] or ""
 
-    return "", dcc.Location(pathname="/dashboard", id="redirect-register")
+    return "", dcc.Location(pathname="/onboarding", id="redirect-register")

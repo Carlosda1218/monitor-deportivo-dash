@@ -1,0 +1,232 @@
+================================================================================
+GUIÓN DE PRESENTACIÓN — CombatIQ
+Para inversionistas · 10 minutos · Demo en vivo
+================================================================================
+
+NOTAS DE USO
+─────────────
+[ ACCIÓN ] = lo que haces en pantalla mientras hablas
+( pausa  ) = momento de dejar que el mensaje aterrice
+  ···      = continúa sin parar
+
+
+================================================================================
+BLOQUE 1 — EL PROBLEMA  [~1:30 min]
+================================================================================
+
+"Antes de mostrarles la app, quiero que se imaginen algo."
+
+"Son las 7 de la mañana. Tienen un atleta de Taekwondo que compite en tres
+semanas. Le mandan un mensaje por WhatsApp: '¿Cómo amaneciste?' El atleta
+responde 'bien' —porque los atletas siempre dicen que están bien—. Y el
+coach toma esa respuesta y decide si hoy entrena fuerte o no."
+
+( pausa )
+
+"Eso es exactamente lo que está pasando hoy en la mayoría de los equipos
+de combate del mundo. Decisiones de entrenamiento —que pueden definir si
+un atleta llega al campeonato o llega lesionado— se toman basadas en un
+mensaje de WhatsApp."
+
+"El problema no es que los coaches no sepan lo que hacen. El problema es
+que no tienen las herramientas para tomar esas decisiones con datos."
+
+"Y los datos existen. Los sensores existen. La inteligencia artificial
+existe. Solo que nadie los había puesto juntos, en un solo lugar, pensados
+específicamente para los deportes de combate."
+
+"Eso es CombatIQ."
+
+
+================================================================================
+BLOQUE 2 — QUÉ ES COMBATIQ  [~1:00 min]
+================================================================================
+
+"CombatIQ es una plataforma de monitoreo del rendimiento diseñada
+específicamente para atletas y coaches de deportes de combate."
+
+"Hoy el foco está en Taekwondo —un deporte con millones de practicantes
+en todo el mundo y muy pocos recursos tecnológicos de este nivel a su
+disposición. Pero la arquitectura de la plataforma está construida para
+escalar a cualquier arte marcial o deporte de contacto: Boxeo, Judo,
+Karate, Kickboxing, MMA. El trabajo ya fue hecho; ampliar el alcance
+es cuestión de tiempo, no de reconstruir desde cero."
+
+"Lo que van a ver en los próximos minutos es la versión funcional y
+probada con atletas reales."
+
+[ ACCIÓN: Abrir la app en el navegador — pantalla de login ]
+
+
+================================================================================
+BLOQUE 3 — DEMO EN VIVO  [~6:00 min]
+================================================================================
+
+── PARTE A: El deportista  (~2:00 min) ──────────────────────────────────────
+
+[ ACCIÓN: Ingresar como deportista ]
+
+"Lo primero que ve el atleta cuando abre la app es su panel personal."
+
+"Pero lo más importante que hace cada mañana es esto:"
+
+[ ACCIÓN: Navegar a la sección de Bienestar / Check-in ]
+
+"El check-in diario. En menos de dos minutos, el atleta responde una serie
+de preguntas diseñadas específicamente para su deporte: ¿cómo dormiste?,
+¿qué tan cansado llegas hoy?, ¿sientes alguna molestia en las piernas?,
+¿te sientes listo para una sesión exigente?"
+
+"No son preguntas genéricas. Para el atleta de Taekwondo preguntamos por
+sus piernas, su explosividad, su capacidad de cambiar de dirección. Para
+un boxeador preguntaríamos por sus manos, sus hombros, su ritmo de golpeo."
+
+[ ACCIÓN: Responder 3-4 preguntas en los sliders y guardar ]
+
+"Y con esas respuestas, el sistema calcula un número."
+
+( pausa )
+
+"El Wellness Score. Un número del 0 al 100 que resume en un solo valor
+qué tan listo está ese atleta para entrenar hoy."
+
+"No es un promedio simple. Cada pregunta tiene un peso diferente según
+qué tan crítica es para el rendimiento en ese deporte. Sueño vale más
+que sensación de piernas pesadas. Eso está calibrado."
+
+── PARTE B: El coach  (~2:30 min) ───────────────────────────────────────────
+
+[ ACCIÓN: Cerrar sesión y entrar como coach ]
+
+"Ahora cambiamos de perspectiva. Esto es lo que ve el coach."
+
+[ ACCIÓN: Mostrar el dashboard del equipo ]
+
+"De un vistazo, el coach sabe cómo está todo su equipo hoy. Verde: listo
+para entrenar fuerte. Naranja: cuidado, algo está pasando. Rojo: este
+atleta necesita atención antes de subir la intensidad."
+
+"Sin llamadas. Sin WhatsApp. Sin adivinar."
+
+[ ACCIÓN: Hacer click en el perfil de un atleta ]
+
+"Si quiere saber más sobre un atleta en particular, entra a su perfil y
+ve la tendencia de las últimas semanas."
+
+[ ACCIÓN: Mostrar gráfica de wellness histórico y, si hay datos, la señal ECG ]
+
+"Y si el atleta entrenó con sensores, aquí están los datos. Frecuencia
+cardíaca, variabilidad cardíaca —que es el indicador más preciso de
+recuperación que existe en la ciencia del deporte—, número de golpes,
+intensidad de impacto. Todo en el mismo lugar."
+
+"Esto es lo que antes requería software de laboratorio de miles de dólares,
+un especialista en fisiología del ejercicio, y horas de análisis. Aquí lo
+tiene el coach en su pantalla, listo."
+
+── PARTE C: La inteligencia artificial  (~1:30 min) ─────────────────────────
+
+[ ACCIÓN: Navegar a la sección de análisis / insights de IA ]
+
+"Pero la parte que más nos gusta mostrar es esta."
+
+( pausa )
+
+"Todos esos datos —el wellness del atleta, su historial de carga, su
+recuperación cardíaca— los lee un modelo de inteligencia artificial.
+Y en lugar de dejarle al coach una tabla de números para interpretar,
+le escribe esto:"
+
+[ ACCIÓN: Mostrar el párrafo generado por la IA ]
+
+"Un análisis en lenguaje natural. Dice cosas como: 'Este atleta lleva
+tres días con wellness por debajo de 60, su variabilidad cardíaca bajó
+un 15% respecto a su baseline, y hoy reportó molestia en la rodilla
+derecha. Se recomienda sesión técnica de baja intensidad y revisar
+carga de la semana anterior antes de subir volumen.'"
+
+"Un coach experimentado llegaría a esa misma conclusión. Pero le tomaría
+revisar varios registros, recordar lo de los días anteriores, y tener
+tiempo para sentarse a analizar. La IA hace eso en segundos, para cada
+atleta del equipo, todos los días."
+
+"Y para los que conocen el deporte: no estamos reemplazando al coach.
+Estamos dándole un asistente que nunca se cansa, que no olvida nada
+y que siempre tiene los datos frescos."
+
+
+================================================================================
+BLOQUE 4 — MERCADO Y ESCALABILIDAD  [~1:00 min]
+================================================================================
+
+"Taekwondo tiene más de 80 millones de practicantes en el mundo. Es
+deporte olímpico desde el año 2000. Latinoamérica —especialmente México,
+Colombia y Venezuela— tiene una base enorme de atletas competitivos y
+una industria de alto rendimiento que está buscando exactamente estas
+herramientas."
+
+"Hoy estamos en Taekwondo porque es donde validamos la plataforma y donde
+los datos son más ricos. Pero el sistema ya reconoce Boxeo. La arquitectura
+está construida por deporte: las preguntas del check-in, las métricas de
+sensores, los umbrales de alerta, todo es configurable por disciplina."
+
+"Agregar Karate o Judo no es reescribir la plataforma. Es calibrar los
+parámetros. Eso es la diferencia entre un producto escalable y uno que
+hay que reconstruir cada vez."
+
+"El mercado al que podemos llegar en 3 años no es solo Taekwondo. Es
+todo el ecosistema de artes marciales y deportes de contacto."
+
+
+================================================================================
+BLOQUE 5 — CIERRE  [~0:30 min]
+================================================================================
+
+"Lo que vieron hoy es un sistema funcional, probado con atletas reales,
+que resuelve un problema real que millones de coaches enfrentan todos
+los días."
+
+"Combina monitoreo biomédico, inteligencia artificial y experiencia de
+usuario en una sola plataforma. Nada de lo que existe hoy hace las
+tres cosas juntas para deportes de combate."
+
+( pausa )
+
+"Estamos en el momento correcto, con el producto correcto, en el mercado
+correcto."
+
+"Gracias."
+
+( dejar silencio — no llenar con palabras )
+
+
+================================================================================
+NOTAS FINALES PARA EL PRESENTADOR
+================================================================================
+
+RITMO
+  · Bloque 1 y 2: hablar despacio, dejar que las imágenes mentales entren.
+  · Bloque 3 (demo): más dinámico, pero sin correr. Si algo no carga,
+    no te disculpes — sigue hablando del valor, no de la pantalla.
+  · Bloque 4 y 5: voz firme, no apresurarse al final.
+
+SI ALGO FALLA EN LA DEMO
+  "Voy a contarles lo que estamos viendo aquí..." y describes lo que
+  debería mostrar. El producto ya está construido; una falla técnica
+  menor no cambia eso.
+
+PREGUNTAS FRECUENTES DE INVERSIONISTAS
+  · "¿Cuántos usuarios tienen?" → Estamos en fase de validación con
+    atletas y equipos reales. Los datos de rendimiento del sistema están
+    probados; ahora vamos a escala.
+  · "¿Qué pasa si un competidor grande copia esto?" → La ventaja no está
+    solo en el código. Está en el conocimiento específico del deporte,
+    los datos acumulados y la relación con los coaches. Eso no se copia
+    de un día para otro.
+  · "¿Por qué Taekwondo y no un deporte más grande?" → Porque es donde
+    tenemos profundidad. Es mejor ser el referente en un deporte que ser
+    genérico en diez. Desde ahí se escala con credibilidad.
+
+================================================================================
+Guión preparado para presentación de mayo de 2026 · CombatIQ
+================================================================================

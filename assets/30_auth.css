@@ -46,9 +46,9 @@
 }
 
 .auth-left__mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -57,8 +57,9 @@
 }
 
 .auth-left__logo {
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.28));
 }
 
 .auth-left__name {
@@ -321,6 +322,7 @@
 }
 
 .auth-demo__pill {
+  display: block;
   padding: 9px 6px;
   border-radius: 11px;
   border: 1px solid rgba(49,68,95,.65);
@@ -332,6 +334,7 @@
   text-align: center;
   transition: border-color .15s ease, background .15s ease;
   line-height: 1.3;
+  text-decoration: none;
   white-space: pre-line;
 }
 .auth-demo__pill:hover {

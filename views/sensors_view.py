@@ -25,7 +25,7 @@ class SensorsView:
     _callbacks_registered = False
 
     ALL_CODES  = ["ECG", "IMU_WRIST", "IMU_FOOT", "IMU_HEAD", "HR_WRIST"]
-    CORE_CODES = {"ECG", "HR_WRIST"}   # sensores del flujo principal
+    CORE_CODES = {"ECG", "IMU_WRIST", "IMU_FOOT", "IMU_HEAD"}   # base ECG + IMU
 
     # Etiquetas legibles de estado
     _STATUS_LABEL = {
@@ -43,6 +43,48 @@ class SensorsView:
         if not SensorsView._callbacks_registered:
             self._register_callbacks()
             SensorsView._callbacks_registered = True
+
+    def _safe_int(self, value):
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    def _coach_sport(self):
+        return str(session.get("sport") or "").strip() or None
+
+    def _can_access_athlete(self, athlete_id: int) -> bool:
+        aid = self._safe_int(athlete_id)
+        actor_id = self._safe_int(session.get("user_id"))
+        role = str(session.get("role") or "")
+        if not (aid and actor_id):
+            return False
+        if role == "admin":
+            return True
+        if role == "deportista":
+            return aid == actor_id
+        if role == "coach":
+            try:
+                return bool(self.db.coach_has_athlete(actor_id, aid, sport=self._coach_sport()))
+            except Exception:
+                try:
+                    roster = self.db.list_roster_for_coach(actor_id, sport=self._coach_sport()) or []
+                    return any(self._safe_int(a.get("id")) == aid for a in roster)
+                except Exception:
+                    return False
+        return False
+
+    def _clean_sensor_codes(self, codes):
+        allowed = set((self.S.catalog() or {}).keys())
+        clean = []
+        for code in codes or []:
+            try:
+                c = self.S.normalize_code(code)
+            except Exception:
+                c = str(code or "").strip().upper()
+            if c in allowed and c not in clean:
+                clean.append(c)
+        return clean
 
     # ------------------------------------------------------------------ #
     #  Layout principal                                                    #
@@ -105,9 +147,10 @@ class SensorsView:
 
     def _split_codes(self, codes):
         codes = codes or []
-        known = [c for c in codes if c in self.ALL_CODES]
+        core = [c for c in codes if c in self.CORE_CODES]
+        lab = [c for c in codes if c in self.ALL_CODES and c not in self.CORE_CODES]
         other = [c for c in codes if c not in self.ALL_CODES]
-        return known, [], other  # mantiene firma (known, lab, other) para compatibilidad
+        return core, lab, other
 
     def _group_block(self, title, subtitle, cards):
         return html.Div(
@@ -209,6 +252,21 @@ class SensorsView:
         missing = 0
         hardware = 0
         focus_names = []
+        athlete_ids = [
+            int(aid) for aid in (self._safe_int(a.get("id")) for a in (athletes or [])) if aid
+        ]
+        sensors_bulk = {}
+        devices_bulk = {}
+        if athlete_ids and hasattr(self.db, "get_user_sensors_bulk"):
+            try:
+                sensors_bulk = self.db.get_user_sensors_bulk(athlete_ids) or {}
+            except Exception:
+                sensors_bulk = {}
+        if athlete_ids and hasattr(self.db, "get_user_devices_bulk"):
+            try:
+                devices_bulk = self.db.get_user_devices_bulk(athlete_ids) or {}
+            except Exception:
+                devices_bulk = {}
 
         for athlete in athletes or []:
             athlete_id = athlete.get("id")
@@ -217,12 +275,18 @@ class SensorsView:
                 continue
 
             try:
-                codes = self.db.get_user_sensors(int(athlete_id)) or []
+                aid_int = int(athlete_id)
+                codes = sensors_bulk.get(aid_int)
+                if codes is None:
+                    codes = self.db.get_user_sensors(aid_int) or []
             except Exception:
                 codes = []
 
             try:
-                devices = self.db.get_user_devices(int(athlete_id)) or []
+                aid_int = int(athlete_id)
+                devices = devices_bulk.get(aid_int)
+                if devices is None:
+                    devices = self.db.get_user_devices(aid_int) or []
             except Exception:
                 devices = []
 
@@ -277,6 +341,13 @@ class SensorsView:
             desc    = S.description(code)
             signals = S.pretty_signals_for(code)
             metrics = S.metrics_for(code)
+            readiness = info.get("readiness")
+            ingestion = info.get("ingestion")
+            hardware_meta = []
+            if readiness:
+                hardware_meta.append(html.P(f"Estado hardware: {readiness}", className="sensor-meta"))
+            if ingestion:
+                hardware_meta.append(html.P(f"Ingesta: {ingestion}", className="sensor-meta"))
 
             _is_core    = code in self.CORE_CODES
             _badge_cls  = "sensor-badge sensor-badge--core" if _is_core else "sensor-badge sensor-badge--lab"
@@ -316,6 +387,7 @@ class SensorsView:
                             ],
                         ),
                         html.P(desc, className="text-muted", style={"marginBottom": "10px"}),
+                        *hardware_meta,
                         html.P(f"Señales: {signals}", className="sensor-meta"),
                         html.P(f"Métricas: {', '.join(metrics) if metrics else '—'}", className="sensor-meta"),
                         *device_rows,
@@ -456,7 +528,7 @@ class SensorsView:
         sport_label = coach_sport or "Deporte de combate"
 
         if role == "coach" and user_id:
-            athletes = self.db.list_athletes_for_coach(int(user_id), sport=coach_sport)
+            athletes = self.db.list_roster_for_coach(int(user_id), sport=coach_sport)
         else:
             athletes = [u for u in self.db.list_users() if u.get("role") == "deportista"]
 
@@ -611,7 +683,12 @@ class SensorsView:
 
         devices_by_code = {}
         for dev in devices:
-            devices_by_code.setdefault(dev["sensor_code"], []).append(dev)
+            try:
+                code = self.S.normalize_code(dev.get("sensor_code"))
+            except Exception:
+                code = dev.get("sensor_code")
+            if code:
+                devices_by_code.setdefault(code, []).append(dev)
 
         core_codes, lab_codes, other_codes = self._split_codes(codes)
 
@@ -669,8 +746,8 @@ class SensorsView:
             ]),
             html.Div(className="ecg-divider"),
 
-            # Polling de estado (cada 15 s)
-            dcc.Interval(id="sens-poll-interval", interval=15_000, n_intervals=0),
+            # La vista atleta renderiza sus cards al entrar; se evita polling oculto.
+            dcc.Interval(id="sens-poll-interval", interval=15_000, n_intervals=0, disabled=True),
 
             summary,
             html.Div(style={"height": "16px"}),
@@ -720,6 +797,8 @@ class SensorsView:
         def load_user_sensors(user_id):
             if not user_id:
                 raise PreventUpdate
+            if not self._can_access_athlete(user_id):
+                raise PreventUpdate
             try:
                 return db.get_user_sensors(int(user_id)) or []
             except Exception:
@@ -736,15 +815,26 @@ class SensorsView:
         def live_info_box(user_id, codes, _n):
             if not user_id:
                 return []
+            if not self._can_access_athlete(user_id):
+                return self._empty_hint(
+                    "No tienes permisos para ver este deportista.",
+                    "Selecciona un atleta de tu roster para revisar sensores.",
+                )
             try:
                 # Dispositivos del usuario seleccionado
                 devices = db.get_user_devices(int(user_id)) or []
                 devices_by_code = {}
                 for dev in devices:
-                    devices_by_code.setdefault(dev["sensor_code"], []).append(dev)
+                    try:
+                        code = self.S.normalize_code(dev.get("sensor_code"))
+                    except Exception:
+                        code = dev.get("sensor_code")
+                    if code:
+                        devices_by_code.setdefault(code, []).append(dev)
 
-                core_codes, lab_codes, other_codes = self._split_codes(codes or [])
-                groups = [self._assignment_summary(codes or [])]
+                clean_codes = self._clean_sensor_codes(codes or [])
+                core_codes, lab_codes, other_codes = self._split_codes(clean_codes)
+                groups = [self._assignment_summary(clean_codes)]
 
                 if core_codes:
                     groups.append(
@@ -786,6 +876,56 @@ class SensorsView:
                             "Puedes dejar lista una base simple con ECG + IMU y guardar cuando lo tengas claro.",
                         )
                     )
+
+                # ── Historial: sensor_sessions por sesión de entrenamiento ──
+                try:
+                    recent_sessions = db.list_sessions(int(user_id), limit=10) or []
+                    ss_cards = []
+                    for s in recent_sessions[:5]:
+                        ss_summary = db.get_sensor_data_summary(s["id"])
+                        if not ss_summary:
+                            continue
+                        ts_label = (s.get("ts_start") or "")[:16].replace("T", " ") or "Sin fecha"
+                        kpi_items = [
+                            html.Span(
+                                [html.Strong(f"{code}: "), f"{info['sample_count']} paq."],
+                                style={"marginRight": "14px", "fontSize": "12px"},
+                            )
+                            for code, info in ss_summary.items()
+                        ]
+                        ss_cards.append(
+                            html.Div(
+                                style={"borderBottom": "1px solid var(--line)",
+                                       "paddingBottom": "8px", "marginBottom": "8px"},
+                                children=[
+                                    html.Div([
+                                        html.Strong(ts_label, style={"fontSize": "13px"}),
+                                        html.Span(f" · {s.get('sport') or ''}", className="text-muted",
+                                                  style={"fontSize": "12px"}),
+                                    ]),
+                                    html.Div(kpi_items, style={"marginTop": "4px"}),
+                                ],
+                            )
+                        )
+                    if ss_cards:
+                        groups.append(
+                            html.Div(
+                                className="card",
+                                style={"marginTop": "16px"},
+                                children=[
+                                    html.H5("Actividad de sensores por sesión",
+                                            className="card-title",
+                                            style={"marginBottom": "8px"}),
+                                    html.P("Paquetes recibidos por sensor en las últimas sesiones.",
+                                           className="text-muted",
+                                           style={"fontSize": "12px", "marginBottom": "10px"}),
+                                    *ss_cards,
+                                ],
+                            )
+                        )
+                except Exception:
+                    pass
+
                 return groups
             except Exception:
                 return []
@@ -804,8 +944,11 @@ class SensorsView:
                 return "No tienes permisos para modificar sensores."
             if not user_id:
                 return "Selecciona un deportista."
+            if not self._can_access_athlete(user_id):
+                return "No tienes permisos para modificar sensores de este deportista."
+            clean_codes = self._clean_sensor_codes(codes or [])
             try:
-                db.set_user_sensors(int(user_id), codes or [])
+                db.set_user_sensors(int(user_id), clean_codes)
             except Exception:
                 return "Error guardando sensores (DB)."
             return "Asignación guardada."
@@ -817,11 +960,13 @@ class SensorsView:
             prevent_initial_call=False,
         )
         def fill_pair_user_opts(_n):
+            if _n:
+                raise PreventUpdate
             role    = str(session.get("role") or "")
             user_id = session.get("user_id")
             if role == "coach" and user_id:
                 coach_sport = str(session.get("sport") or "").strip() or None
-                athletes = db.list_athletes_for_coach(int(user_id), sport=coach_sport)
+                athletes = db.list_roster_for_coach(int(user_id), sport=coach_sport)
             elif role == "admin":
                 athletes = [u for u in db.list_users() if u.get("role") == "deportista"]
             else:
@@ -848,18 +993,27 @@ class SensorsView:
                 return "No tienes permisos."
             if not device_id or not device_id.strip():
                 return "Introduce el ID del dispositivo (MAC / UUID)."
-            if not sensor_code:
+            try:
+                clean_sensor_code = self.S.normalize_code(sensor_code)
+            except Exception:
+                clean_sensor_code = str(sensor_code or "").strip().upper()
+            if not clean_sensor_code:
                 return "Selecciona el tipo de sensor."
+            if clean_sensor_code not in set((self.S.catalog() or {}).keys()):
+                return "Selecciona un tipo de sensor válido."
             if not target_user_id:
                 return "Selecciona el deportista al que asociar el dispositivo."
+            if not self._can_access_athlete(target_user_id):
+                return "No tienes permisos para emparejar dispositivos a este deportista."
+            clean_device_id = device_id.strip()[:128]
             try:
                 db.register_device(
                     int(target_user_id),
-                    sensor_code.strip().upper(),
-                    device_id.strip(),
-                    device_label=label or None,
-                    firmware_version=firmware or None,
+                    clean_sensor_code,
+                    clean_device_id,
+                    device_label=(label or "").strip()[:120] or None,
+                    firmware_version=(firmware or "").strip()[:80] or None,
                 )
-                return f"Dispositivo '{device_id.strip()}' emparejado con éxito."
+                return f"Dispositivo '{clean_device_id}' emparejado con éxito."
             except Exception as exc:
                 return f"Error al registrar: {exc}"

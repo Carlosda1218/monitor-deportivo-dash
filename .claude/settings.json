@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import pages.dashboard; print\\('dashboard OK'\\)\")",
+      "Bash(python -c \"import pages.onboarding; print\\('onboarding OK'\\)\")",
+      "Bash(python -c \"import pages.metricas; import db; m=db.get_platform_metrics\\(\\); print\\('WAU trend:', m['wau_trend']\\); print\\('metricas OK'\\)\")",
+      "Bash(python -c \"import ai_insights; print\\('ai_insights OK'\\); import analysis_engine; print\\('analysis_engine OK'\\)\")"
+    ]
+  }
+}

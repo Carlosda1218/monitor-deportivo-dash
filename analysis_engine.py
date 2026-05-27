@@ -225,6 +225,8 @@ def hrv_readiness(ecg_files: List[dict], ecg_metrics_fn) -> dict:
             "zone": "no_data",
             "label": "Sin registros ECG — sube tu primera medición",
             "trend_data": [],
+            "today_date": None,
+            "days_since": None,
         }
 
     # Baseline: media de los últimos 30 días (todos los registros)
@@ -268,6 +270,9 @@ def hrv_readiness(ecg_files: List[dict], ecg_metrics_fn) -> dict:
         if _parse_ts(k) and _parse_ts(k) >= _days_ago(14)
     ]
 
+    today_dt    = today_rec["dt"]
+    days_since  = (datetime.utcnow() - today_dt).days
+
     return {
         "today_rmssd": round(today_rmssd, 1),
         "baseline_rmssd": round(baseline, 1),
@@ -276,6 +281,8 @@ def hrv_readiness(ecg_files: List[dict], ecg_metrics_fn) -> dict:
         "zone": zone,
         "label": label,
         "trend_data": trend_data,
+        "today_date": today_dt.strftime("%Y-%m-%d"),
+        "days_since": days_since,
     }
 
 
@@ -609,10 +616,22 @@ def full_report(
     if imu_rows is None:
         imu_rows = db_module.list_imu_metrics(int(uid))
 
-    # ECG metrics por archivo
+    # ECG metrics por archivo. Preferimos una consulta bulk para evitar N+1
+    # cuando el dashboard del coach renderiza tarjetas o informes.
     ecg_files = db_module.list_ecg_files(int(uid))
+    metrics_by_file = {}
+    if hasattr(db_module, "list_latest_ecg_metrics_for_files"):
+        try:
+            metrics_by_file = db_module.list_latest_ecg_metrics_for_files(
+                [f.get("id") for f in ecg_files if f.get("id") is not None]
+            )
+        except Exception:
+            metrics_by_file = {}
 
     def _get_metrics_for_file(file_id: int):
+        cached = metrics_by_file.get(int(file_id)) if metrics_by_file else None
+        if cached is not None:
+            return cached
         with db_module._get_conn() as con:
             cur = con.cursor()
             cur.execute(

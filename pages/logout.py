@@ -2,8 +2,9 @@
 from flask import session
 
 def layout():
-    session.clear()
+    if session.get("user_id"):
+        session.clear()
     return html.Div([
-        html.Div("Cerrando sesión…", style={"opacity": 0.7}),
-        dcc.Location(pathname="/login", id="redirect-logout")
+        html.Div("Sesión cerrada.", style={"opacity": 0.7, "marginBottom": "12px"}),
+        dcc.Link("Volver a iniciar sesión", href="/login", className="btn btn-primary"),
     ])

@@ -17,11 +17,13 @@ SENSOR_CATALOG: Dict[str, Dict] = {
     "ECG": {
         "name": "Banda torácica ECG / HRV",
         "short": "ECG / HRV",
+        "readiness": "CSV/API listo; BLE comercial pendiente",
+        "ingestion": "CSV manual o POST /api/sensor-data con metricas ECG",
         "description": (
             "Banda torácica que registra la señal ECG e intervalos R–R. "
             "CombatIQ calcula frecuencia cardiaca, variabilidad (HRV) y "
             "carga interna para monitorizar recuperación y estado de forma. "
-            "Compatible con Polar H10 y sensores BLE similares."
+            "Puede integrarse con bandas comerciales mediante CSV/API; BLE directo requiere adaptador."
         ),
         "signals": ["ecg"],
         "metrics": ["BPM", "SDNN", "RMSSD", "latidos detectados"],
@@ -31,6 +33,8 @@ SENSOR_CATALOG: Dict[str, Dict] = {
     "IMU_WRIST": {
         "name": "IMU muñeca / guante",
         "short": "IMU muñeca",
+        "readiness": "BLE custom/API/CSV listo",
+        "ingestion": "BLE hub Nordic UART, CSV manual o POST /api/sensor-data",
         "description": (
             "Unidad inercial en muñeca o bajo las vendas. Detecta golpes de brazo, "
             "estima volumen (nº de golpes), ritmo (golpes/min) e intensidad (g de impacto). "
@@ -45,6 +49,8 @@ SENSOR_CATALOG: Dict[str, Dict] = {
     "IMU_FOOT": {
         "name": "IMU tobillo / pie",
         "short": "IMU pie",
+        "readiness": "BLE custom/API/CSV listo",
+        "ingestion": "BLE hub Nordic UART, CSV manual o POST /api/sensor-data",
         "description": (
             "Unidad inercial en tobillo o empeine. Detecta patadas, "
             "estima volumen (nº de patadas), frecuencia (patadas/min), "
@@ -59,6 +65,8 @@ SENSOR_CATALOG: Dict[str, Dict] = {
     "IMU_HEAD": {
         "name": "IMU casco / cabeza",
         "short": "IMU cabeza",
+        "readiness": "BLE custom/API/CSV listo",
+        "ingestion": "BLE hub Nordic UART, CSV manual o POST /api/sensor-data",
         "description": (
             "IMU integrada en el casco o cabezal. Registra impactos recibidos, "
             "intensidad de cada impacto (pico de aceleración en g) y acumulación de carga "
@@ -73,6 +81,8 @@ SENSOR_CATALOG: Dict[str, Dict] = {
     "HR_WRIST": {
         "name": "FC desde reloj / pulsera",
         "short": "FC reloj",
+        "readiness": "Experimental; requiere adaptador CSV/API",
+        "ingestion": "Pendiente de conector directo; usar exportacion CSV/API puente",
         "description": (
             "Frecuencia cardiaca obtenida desde un reloj inteligente o pulsera de actividad. "
             "Menos preciso que el ECG pero más accesible para deportistas que ya usan "
@@ -87,10 +97,34 @@ SENSOR_CATALOG: Dict[str, Dict] = {
 }
 
 
+SENSOR_ALIASES: Dict[str, str] = {
+    "IMU": "IMU_WRIST",
+    "IMU_ARM": "IMU_WRIST",
+    "IMU_GLOVE": "IMU_WRIST",
+    "IMU_HAND": "IMU_WRIST",
+    "IMU_LEG": "IMU_FOOT",
+    "IMU_ANKLE": "IMU_FOOT",
+    "IMU_KICK": "IMU_FOOT",
+    "HR": "HR_WRIST",
+    "HEART_RATE": "HR_WRIST",
+    "PULSE": "HR_WRIST",
+}
+
+
 # === Helpers públicos ===
 
 def catalog() -> Dict[str, Dict]:
     return SENSOR_CATALOG
+
+
+def normalize_code(code: str | None) -> str:
+    """Normaliza aliases del hub/hardware al código canónico usado por la UI."""
+    clean = str(code or "").strip().upper()
+    return SENSOR_ALIASES.get(clean, clean)
+
+
+def is_known_code(code: str | None) -> bool:
+    return normalize_code(code) in SENSOR_CATALOG
 
 
 def labels_for_checklist() -> List[Dict]:
@@ -132,8 +166,11 @@ def pretty_signals_for(code: str) -> str:
 
 def sensors_for_sport(sport: str) -> List[str]:
     """Códigos de sensores recomendados para un deporte concreto."""
-    sport = (sport or "").strip().lower()
+    s = (sport or "").strip().lower()
+    # Normaliza "box" → "boxeo" para coincidir con sport_relevance del catálogo
+    if s == "box":
+        s = "boxeo"
     return [
         code for code, data in SENSOR_CATALOG.items()
-        if sport in [s.lower() for s in data.get("sport_relevance", [])]
+        if s in [r.lower() for r in data.get("sport_relevance", [])]
     ]

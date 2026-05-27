@@ -1,0 +1,10 @@
+
+  Abre en este equipo:  http://127.0.0.1:8051/
+  Red local (otros):    http://192.168.0.27:8051/
+  API sensores:         http://192.168.0.27:8051/api/sensor-ping
+                        http://192.168.0.27:8051/api/sensor-data
+
+Dash is running on http://0.0.0.0:8051/
+
+ * Serving Flask app 'app'
+ * Debug mode: off

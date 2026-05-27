@@ -1,8 +1,9 @@
-﻿import os, json, sqlite3, hashlib
-from datetime import datetime
+import os, json, sqlite3, hashlib, hmac, logging, secrets
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 DB_PATH = os.path.join("data", "users.db")
+_WAL_CONFIGURED_PATHS = set()
 
 
 # ======================
@@ -25,9 +26,13 @@ def _conn():
     except Exception:
         pass
 
-    # Concurrencia más estable (recomendado en apps web con SQLite)
+    # Concurrencia más estable. journal_mode=WAL puede tomar locks, así que se
+    # configura una vez por ruta/proceso en lugar de repetirlo en cada query.
     try:
-        con.execute("PRAGMA journal_mode = WAL;")
+        db_key = os.path.abspath(DB_PATH)
+        if db_key not in _WAL_CONFIGURED_PATHS:
+            con.execute("PRAGMA journal_mode = WAL;")
+            _WAL_CONFIGURED_PATHS.add(db_key)
     except Exception:
         pass
     try:
@@ -315,6 +320,303 @@ def migrate_db():
                     pass
             _set_db_version(con, 50)
 
+        # --------------------------
+        # Migración 60: macros en nutrition_logs
+        # --------------------------
+        if current < 60:
+            cur = con.cursor()
+            for col in ("protein_g", "carbs_g", "fats_g", "water_ml"):
+                if not _has_column(con, "nutrition_logs", col):
+                    try:
+                        cur.execute(f"ALTER TABLE nutrition_logs ADD COLUMN {col} REAL")
+                    except sqlite3.OperationalError:
+                        pass
+            _set_db_version(con, 60)
+
+        # Migración 70: tabla announcements (comunicados in-app del coach)
+        # --------------------------
+        if current < 70:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS announcements(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    coach_id INTEGER NOT NULL,
+                    sport TEXT,
+                    title TEXT NOT NULL,
+                    body TEXT,
+                    pinned INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            _set_db_version(con, 70)
+
+        # Migración 80: preferencias de notificación por usuario
+        # --------------------------
+        if current < 80:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS notification_prefs(
+                    user_id INTEGER PRIMARY KEY,
+                    low_wellness_alert INTEGER DEFAULT 1,
+                    announcement_notify INTEGER DEFAULT 1,
+                    checkin_reminder INTEGER DEFAULT 0,
+                    email_override TEXT,
+                    updated_at TEXT
+                )"""
+            )
+            _set_db_version(con, 80)
+
+        # Migración 90: columna onboarding_done en users
+        # --------------------------
+        if current < 90:
+            cur = con.cursor()
+            if not _has_column(con, "users", "onboarding_done"):
+                try:
+                    cur.execute("ALTER TABLE users ADD COLUMN onboarding_done INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
+            _set_db_version(con, 90)
+
+        # Migración 100: tabla competition_events (planificación de competencia)
+        # --------------------------
+        if current < 100:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS competition_events(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    event_date TEXT NOT NULL,
+                    sport TEXT,
+                    target_weight REAL,
+                    location TEXT,
+                    notes TEXT,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            _set_db_version(con, 100)
+
+        # Migración 110: tabla competition_results (logros / trofeos del atleta)
+        if current < 110:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS competition_results(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    event_date TEXT NOT NULL,
+                    medal TEXT DEFAULT 'participant',
+                    category TEXT,
+                    location TEXT,
+                    notes TEXT,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            _set_db_version(con, 110)
+
+        # Migración 120: notas de sesión del coach por atleta
+        if current < 120:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS session_notes(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    coach_id INTEGER NOT NULL,
+                    athlete_id INTEGER NOT NULL,
+                    note TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            _set_db_version(con, 120)
+
+        # Migración 130: tabla messages (chat interno coach-atleta)
+        if current < 130:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS messages(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_id INTEGER NOT NULL,
+                    receiver_id INTEGER NOT NULL,
+                    body TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    read_at TEXT
+                )"""
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, read_at)")
+            _set_db_version(con, 130)
+
+        # Migración 140: índices de rendimiento faltantes
+        # --------------------------
+        if current < 140:
+            cur = con.cursor()
+            for _sql in [
+                "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+                "CREATE INDEX IF NOT EXISTS idx_questionnaires_ts ON questionnaires(user_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(athlete_id, ts_start)",
+            ]:
+                try:
+                    cur.execute(_sql)
+                except Exception:
+                    pass
+            _set_db_version(con, 140)
+
+        # Migración 150: foto de perfil
+        # --------------------------
+        if current < 150:
+            cur = con.cursor()
+            if not _has_column(con, "users", "avatar_url"):
+                try:
+                    cur.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+                except sqlite3.OperationalError:
+                    pass
+            _set_db_version(con, 150)
+
+        # Migración 160: sensor_type + métricas giroscopio en imu_metrics
+        # --------------------------
+        if current < 160:
+            cur = con.cursor()
+            for col, typedef in [
+                ("sensor_type",   "TEXT"),
+                ("mean_ang_vel",  "REAL"),
+                ("max_ang_vel",   "REAL"),
+            ]:
+                if not _has_column(con, "imu_metrics", col):
+                    try:
+                        cur.execute(f"ALTER TABLE imu_metrics ADD COLUMN {col} {typedef}")
+                    except sqlite3.OperationalError:
+                        pass
+            _set_db_version(con, 160)
+
+        # Migración 170: índice correcto para ordenar sesiones por fecha de inicio.
+        # La versión 140 intentaba indexar una columna "date" que no existe en sessions.
+        if current < 170:
+            cur = con.cursor()
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_athlete_ts ON sessions(athlete_id, ts_start)")
+            _set_db_version(con, 170)
+
+        # Migración 180: sensor_sessions — entidad de sesión sensorial.
+        # Enlaza sessions.id con sensor_devices.id; registra qué sensores
+        # estuvieron activos, cuándo y cuántos paquetes entregaron.
+        # Diseñada para ser compatible con Postgres sin cambios (ISO timestamps, sin
+        # funciones SQLite en queries de lectura, índices explícitos en FK columns).
+        if current < 180:
+            cur = con.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sensor_sessions (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id   INTEGER NOT NULL,
+                    device_id    INTEGER,
+                    sensor_code  TEXT    NOT NULL,
+                    ts_start     TEXT    NOT NULL
+                                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    ts_end       TEXT,
+                    status       TEXT    NOT NULL DEFAULT 'collecting',
+                    sample_count INTEGER NOT NULL DEFAULT 0,
+                    notes        TEXT,
+                    created_at   TEXT    NOT NULL
+                                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sensor_sessions_session "
+                "ON sensor_sessions(session_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sensor_sessions_device "
+                "ON sensor_sessions(device_id)"
+            )
+            _set_db_version(con, 180)
+
+        # --------------------------
+        # Migración 190: feedback nutricional del coach
+        # --------------------------
+        if current < 190:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS nutrition_coach_feedback(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    athlete_id INTEGER NOT NULL,
+                    coach_id INTEGER NOT NULL,
+                    week_start TEXT NOT NULL,
+                    note TEXT,
+                    validated_at TEXT,
+                    created_at TEXT,
+                    UNIQUE(athlete_id, coach_id, week_start),
+                    FOREIGN KEY (athlete_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (coach_id)   REFERENCES users(id) ON DELETE CASCADE
+                )"""
+            )
+            try:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_nutri_feedback_athlete "
+                    "ON nutrition_coach_feedback(athlete_id)"
+                )
+            except Exception:
+                pass
+            _set_db_version(con, 190)
+
+        # --------------------------
+        # Migracion 200: indices de lectura para dashboards con historicos
+        # --------------------------
+        if current < 200:
+            cur = con.cursor()
+            for _sql in [
+                "CREATE INDEX IF NOT EXISTS idx_questionnaires_user_id_desc "
+                "ON questionnaires(user_id, id DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_questionnaires_session "
+                "ON questionnaires(session_id)",
+                "CREATE INDEX IF NOT EXISTS idx_ecg_files_session_id_desc "
+                "ON ecg_files(session_id, id DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_ecg_metrics_file_id_desc "
+                "ON ecg_metrics(ecg_file_id, id DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_imu_metrics_session_ts "
+                "ON imu_metrics(session_id, ts DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_imu_metrics_user_ts "
+                "ON imu_metrics(user_id, ts DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_messages_pair_ts "
+                "ON messages(sender_id, receiver_id, ts DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_read "
+                "ON messages(receiver_id, sender_id, read_at)",
+                "CREATE INDEX IF NOT EXISTS idx_weights_user_date_desc "
+                "ON weights(user_id, date DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_nutrition_user_date_desc "
+                "ON nutrition_logs(user_id, date DESC)",
+            ]:
+                try:
+                    cur.execute(_sql)
+                except Exception:
+                    pass
+            _set_db_version(con, 200)
+
+        # --------------------------
+        # Migracion 210: recuperacion de contraseña
+        # --------------------------
+        if current < 210:
+            cur = con.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS password_reset_tokens(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT,
+                    request_ip TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )"""
+            )
+            for _sql in [
+                "CREATE INDEX IF NOT EXISTS idx_password_reset_user "
+                "ON password_reset_tokens(user_id, expires_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_password_reset_hash "
+                "ON password_reset_tokens(token_hash)",
+            ]:
+                try:
+                    cur.execute(_sql)
+                except Exception:
+                    pass
+            _set_db_version(con, 210)
+
 # ======================
 # Inicialización DB
 # ======================
@@ -479,32 +781,47 @@ def init_db():
     # Ejecuta migraciones nuevas (idempotente y versionado)
     try:
         migrate_db()
-    except Exception:
-        # No matamos la app si una migración falla; pero en dev lo verás en consola.
-        pass
+    except Exception as exc:
+        logging.getLogger("combatiq.db").exception("DB migration failed during init_db: %s", exc)
 
 
 # ======================
 # Users / Auth
 # ======================
 
-def _hash_pw(pw: str):
-    """
-    Hash de password. Intenta usar bcrypt y si no, SHA256 como fallback.
-    """
+def _hash_pw(pw: str) -> bytes:
     try:
         import bcrypt
         return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt())
-    except Exception:
-        return hashlib.sha256(pw.encode("utf-8")).hexdigest().encode("utf-8")
+    except ImportError:
+        # bcrypt no disponible — usar PBKDF2-HMAC (seguro, stdlib)
+        salt = os.urandom(16)
+        dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, 260_000)
+        return b"pbkdf2:" + salt.hex().encode() + b":" + dk.hex().encode()
 
 
-def _check_pw(pw: str, hashed: bytes):
+def _check_pw(pw: str, hashed) -> bool:
+    if isinstance(hashed, str):
+        hashed = hashed.encode("utf-8")
+    # Hashes PBKDF2 (fallback moderno)
+    if hashed.startswith(b"pbkdf2:"):
+        try:
+            _, salt_hex, dk_hex = hashed.split(b":")
+            salt = bytes.fromhex(salt_hex.decode())
+            dk   = bytes.fromhex(dk_hex.decode())
+            candidate = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, 260_000)
+            return hmac.compare_digest(candidate, dk)
+        except Exception:
+            return False
+    # Hashes bcrypt (primario)
     try:
         import bcrypt
         return bcrypt.checkpw(pw.encode("utf-8"), hashed)
     except Exception:
-        return hashlib.sha256(pw.encode("utf-8")).hexdigest().encode("utf-8") == hashed
+        pass
+    # Hashes SHA256 legacy (solo verificación, no se crean nuevos)
+    legacy = hashlib.sha256(pw.encode("utf-8")).hexdigest().encode("utf-8")
+    return hmac.compare_digest(legacy, hashed)
 
 
 def create_user(name, email, pw, role, sport, coach_id=None):
@@ -534,14 +851,14 @@ def get_user_by_email(email: str):
     with _get_conn() as con:
         cur = con.cursor()
         cur.execute(
-            "SELECT id,name,email,role,sport,password_hash,created_at,coach_id,athlete_profile_json "
+            "SELECT id,name,email,role,sport,password_hash,created_at,coach_id,athlete_profile_json,avatar_url,onboarding_done "
             "FROM users WHERE email=?",
             (email,),
         )
         row = cur.fetchone()
     if not row:
         return None
-    cols = ["id", "name", "email", "role", "sport", "password_hash", "created_at", "coach_id", "athlete_profile_json"]
+    cols = ["id", "name", "email", "role", "sport", "password_hash", "created_at", "coach_id", "athlete_profile_json", "avatar_url", "onboarding_done"]
     return {k: v for k, v in zip(cols, row)}
 
 
@@ -549,15 +866,137 @@ def get_user_by_id(uid: int):
     with _get_conn() as con:
         cur = con.cursor()
         cur.execute(
-            "SELECT id,name,email,role,sport,password_hash,created_at,coach_id,athlete_profile_json "
+            "SELECT id,name,email,role,sport,password_hash,created_at,coach_id,athlete_profile_json,avatar_url,onboarding_done "
             "FROM users WHERE id=?",
             (uid,),
         )
         row = cur.fetchone()
     if not row:
         return None
-    cols = ["id", "name", "email", "role", "sport", "password_hash", "created_at", "coach_id", "athlete_profile_json"]
+    cols = ["id", "name", "email", "role", "sport", "password_hash", "created_at", "coach_id", "athlete_profile_json", "avatar_url", "onboarding_done"]
     return {k: v for k, v in zip(cols, row)}
+
+
+def _find_user_by_email_casefold(con: sqlite3.Connection, email: str):
+    email_clean = (email or "").strip()
+    if not email_clean:
+        return None
+    cur = con.cursor()
+    cur.execute(
+        "SELECT id,name,email,role,sport FROM users WHERE LOWER(email)=LOWER(?)",
+        (email_clean,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = ["id", "name", "email", "role", "sport"]
+    return {k: v for k, v in zip(cols, row)}
+
+
+def update_user_password(uid: int, new_password: str) -> bool:
+    """Actualiza la contraseña de un usuario con el hash vigente del proyecto."""
+    if not uid or not new_password:
+        return False
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (_hash_pw(str(new_password)), int(uid)),
+        )
+        return cur.rowcount > 0
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256((token or "").strip().encode("utf-8")).hexdigest()
+
+
+def create_password_reset_token(email: str, request_ip: str = None,
+                                ttl_minutes: int = 30) -> dict:
+    """
+    Crea un token temporal de recuperacion si el correo existe.
+
+    La UI debe mostrar siempre un mensaje generico para no revelar si el correo
+    esta registrado. En local/demo puede mostrar `token` para probar el flujo.
+    """
+    email_clean = (email or "").strip()
+    now = datetime.utcnow()
+    expires = now + timedelta(minutes=max(5, int(ttl_minutes or 30)))
+    token = secrets.token_urlsafe(18)
+    token_hash = _hash_reset_token(token)
+
+    with _get_conn() as con:
+        user = _find_user_by_email_casefold(con, email_clean)
+        if not user:
+            return {"created": False, "token": None, "expires_at": expires.isoformat()}
+
+        cur = con.cursor()
+        # Invalida tokens anteriores sin borrar auditoria.
+        cur.execute(
+            "UPDATE password_reset_tokens SET used_at=? "
+            "WHERE user_id=? AND used_at IS NULL",
+            (now.isoformat(), int(user["id"])),
+        )
+        cur.execute(
+            """INSERT INTO password_reset_tokens
+               (user_id, token_hash, created_at, expires_at, request_ip)
+               VALUES(?,?,?,?,?)""",
+            (
+                int(user["id"]),
+                token_hash,
+                now.isoformat(),
+                expires.isoformat(),
+                (request_ip or "")[:64] or None,
+            ),
+        )
+    return {
+        "created": True,
+        "token": token,
+        "expires_at": expires.isoformat(),
+        "user_id": user["id"],
+    }
+
+
+def reset_password_with_token(email: str, token: str, new_password: str) -> bool:
+    """Valida token temporal y cambia la contraseña en una sola transaccion."""
+    email_clean = (email or "").strip()
+    token_clean = (token or "").strip()
+    if not email_clean or not token_clean or not new_password:
+        return False
+
+    now = datetime.utcnow().isoformat()
+    token_hash = _hash_reset_token(token_clean)
+    with _get_conn() as con:
+        user = _find_user_by_email_casefold(con, email_clean)
+        if not user:
+            return False
+
+        cur = con.cursor()
+        cur.execute(
+            """SELECT id FROM password_reset_tokens
+               WHERE user_id=? AND token_hash=? AND used_at IS NULL
+                 AND expires_at >= ?
+               ORDER BY id DESC LIMIT 1""",
+            (int(user["id"]), token_hash, now),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+
+        cur.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (_hash_pw(str(new_password)), int(user["id"])),
+        )
+        cur.execute(
+            "UPDATE password_reset_tokens SET used_at=? WHERE id=?",
+            (now, int(row[0])),
+        )
+    return True
+
+
+def save_avatar_url(uid: int, data_url: str) -> None:
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE users SET avatar_url=? WHERE id=?", (data_url, uid))
 
 
 def list_users():
@@ -618,13 +1057,13 @@ def list_athletes_for_coach(coach_id: int, sport: str = None):
         cur = con.cursor()
         if sport:
             cur.execute(
-                "SELECT id,name,role,sport,created_at,coach_id "
+                "SELECT id,name,role,sport,created_at,coach_id,avatar_url "
                 "FROM users WHERE role='deportista' AND coach_id=? AND sport=? ORDER BY id DESC",
                 (coach_id, sport),
             )
         else:
             cur.execute(
-                "SELECT id,name,role,sport,created_at,coach_id "
+                "SELECT id,name,role,sport,created_at,coach_id,avatar_url "
                 "FROM users WHERE role='deportista' AND coach_id=? ORDER BY id DESC",
                 (coach_id,),
             )
@@ -639,6 +1078,7 @@ def list_athletes_for_coach(coach_id: int, sport: str = None):
                 "sport": r[3],
                 "created_at": r[4],
                 "coach_id": r[5],
+                "avatar_url": r[6] if len(r) > 6 else None,
             }
         )
     return out
@@ -682,6 +1122,7 @@ def add_user(name, sport=None, role="deportista", coach_id=None):
                 "INSERT INTO users(name,role,sport,created_at,coach_id) VALUES(?,?,?,?,?)",
                 (name, role or "deportista", sport, datetime.utcnow().isoformat(), coach_id),
             )
+        return cur.lastrowid
 
 
 def coach_create_athlete_with_login(coach_id: int, name: str, email: str, pw: str, sport: str):
@@ -885,22 +1326,35 @@ def remove_adopted_athlete(coach_id: int, athlete_id: int):
         )
 
 
-def list_my_athletes(coach_id: int):
+def list_my_athletes(coach_id: int, sport: str = None):
     """
     Devuelve deportistas adoptados por un coach (JOIN coach_athletes + users).
+    Si se pasa sport, filtra por deporte en la propia query.
     """
     with _get_conn() as con:
         cur = con.cursor()
-        cur.execute(
-            """
-            SELECT u.id, u.name, u.role, u.sport, u.created_at, u.coach_id
-            FROM coach_athletes ca
-            JOIN users u ON u.id = ca.athlete_id
-            WHERE ca.coach_id = ?
-            ORDER BY u.name
-            """,
-            (int(coach_id),),
-        )
+        if sport:
+            cur.execute(
+                """
+                SELECT u.id, u.name, u.role, u.sport, u.created_at, u.coach_id, u.avatar_url
+                FROM coach_athletes ca
+                JOIN users u ON u.id = ca.athlete_id
+                WHERE ca.coach_id = ? AND u.sport = ?
+                ORDER BY u.name
+                """,
+                (int(coach_id), sport),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT u.id, u.name, u.role, u.sport, u.created_at, u.coach_id, u.avatar_url
+                FROM coach_athletes ca
+                JOIN users u ON u.id = ca.athlete_id
+                WHERE ca.coach_id = ?
+                ORDER BY u.name
+                """,
+                (int(coach_id),),
+            )
         rows = cur.fetchall()
 
     return [
@@ -911,29 +1365,28 @@ def list_my_athletes(coach_id: int):
             "sport": r[3],
             "created_at": r[4],
             "coach_id": r[5],
+            "avatar_url": r[6] if len(r) > 6 else None,
         }
         for r in rows
     ]
 
 
-def list_roster_for_coach(coach_id: int):
+def list_roster_for_coach(coach_id: int, sport: str = None):
     """
-    Roster unificado para app_updated.py.
-    Une:
-      - adopción (coach_athletes -> list_my_athletes)
-      - legacy (users.coach_id -> list_athletes_for_coach)
-    sin duplicados.
+    Roster unificado.
+    Une adopción (coach_athletes) + legacy (users.coach_id) sin duplicados.
+    Si se pasa sport, filtra en DB en ambas fuentes.
     """
     out = []
     seen = set()
 
     try:
-        a1 = list_my_athletes(int(coach_id)) or []
+        a1 = list_my_athletes(int(coach_id), sport=sport) or []
     except Exception:
         a1 = []
 
     try:
-        a2 = list_athletes_for_coach(int(coach_id)) or []
+        a2 = list_athletes_for_coach(int(coach_id), sport=sport) or []
     except Exception:
         a2 = []
 
@@ -945,6 +1398,17 @@ def list_roster_for_coach(coach_id: int):
         out.append(a)
 
     return out
+
+
+def coach_has_athlete(coach_id: int, athlete_id: int, sport: str = None) -> bool:
+    """
+    Valida pertenencia coach-atleta usando roster unificado:
+    adopcion en coach_athletes y relacion legacy users.coach_id.
+    """
+    if not coach_id or not athlete_id:
+        return False
+    roster = list_roster_for_coach(int(coach_id), sport=sport)
+    return any(int(a.get("id")) == int(athlete_id) for a in roster if a.get("id") is not None)
 
 
 # ======================
@@ -976,6 +1440,18 @@ def list_teams(coach_id: int):
         {"id": r[0], "coach_id": r[1], "name": r[2], "sport": r[3], "created_at": r[4]}
         for r in rows
     ]
+
+
+def team_belongs_to_coach(team_id: int, coach_id: int) -> bool:
+    if not team_id or not coach_id:
+        return False
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT 1 FROM teams WHERE id=? AND coach_id=? LIMIT 1",
+            (int(team_id), int(coach_id)),
+        )
+        return cur.fetchone() is not None
 
 
 def add_team_member(team_id: int, athlete_id: int, role_label: str = None):
@@ -1071,6 +1547,64 @@ def close_session(session_id: int, ts_end: str = None):
         )
 
 
+def rename_session(session_id: int, new_name: str) -> bool:
+    """Update the notes/name field of a session. Returns True if found and updated."""
+    name = str(new_name or "").strip()[:200]
+    if not name:
+        return False
+    with _get_conn() as con:
+        cur = con.execute(
+            "UPDATE sessions SET notes = ? WHERE id = ?",
+            (name, int(session_id)),
+        )
+        return cur.rowcount > 0
+
+
+def delete_session(session_id: int) -> bool:
+    """Delete a session and its associated ECG files + IMU metrics records.
+    Physical files on disk are also removed. Returns True if the session existed."""
+    import os as _os
+    sid = int(session_id)
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute("SELECT id FROM sessions WHERE id=?", (sid,))
+        if not cur.fetchone():
+            return False
+        # Remove ECG physical files
+        if _has_column(con, "ecg_files", "session_id"):
+            cur.execute(
+                "DELETE FROM ecg_metrics WHERE ecg_file_id IN "
+                "(SELECT id FROM ecg_files WHERE session_id=?)",
+                (sid,),
+            )
+            cur.execute("SELECT filename FROM ecg_files WHERE session_id=?", (sid,))
+            for (fname,) in cur.fetchall():
+                for base in ["data/ecg", _os.path.join(_os.path.dirname(__file__), "data", "ecg")]:
+                    fpath = _os.path.join(base, fname)
+                    if _os.path.exists(fpath):
+                        try:
+                            _os.remove(fpath)
+                        except Exception:
+                            pass
+            cur.execute("DELETE FROM ecg_files WHERE session_id=?", (sid,))
+        # Remove IMU sidecar + metrics
+        try:
+            cur.execute("SELECT filename FROM imu_metrics WHERE session_id=?", (sid,))
+            for (stem,) in cur.fetchall():
+                for base in ["data/ecg", _os.path.join(_os.path.dirname(__file__), "data", "ecg")]:
+                    jpath = _os.path.join(base, f"{stem}.json")
+                    if _os.path.exists(jpath):
+                        try:
+                            _os.remove(jpath)
+                        except Exception:
+                            pass
+            cur.execute("DELETE FROM imu_metrics WHERE session_id=?", (sid,))
+        except Exception:
+            pass
+        cur.execute("DELETE FROM sessions WHERE id=?", (sid,))
+    return True
+
+
 def get_session(session_id: int):
     with _get_conn() as con:
         cur = con.cursor()
@@ -1105,6 +1639,52 @@ def list_sessions(athlete_id: int, limit: int = 50):
         rows = cur.fetchall()
     cols = ["id", "athlete_id", "created_by", "ts_start", "ts_end", "sport", "notes", "status", "created_at"]
     return [{k: v for k, v in zip(cols, r)} for r in rows]
+
+
+def list_sessions_for_team(athlete_ids: list, limit: int = 200) -> list:
+    """Devuelve sesiones de varios atletas en una sola query. Reemplaza el loop N+1."""
+    if not athlete_ids:
+        return []
+    placeholders = ",".join("?" * len(athlete_ids))
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            f"SELECT id, athlete_id, created_by, ts_start, ts_end, sport, notes, status, created_at "
+            f"FROM sessions WHERE athlete_id IN ({placeholders}) "
+            f"ORDER BY datetime(ts_start) DESC LIMIT ?",
+            [*athlete_ids, int(limit)],
+        )
+        rows = cur.fetchall()
+    cols = ["id", "athlete_id", "created_by", "ts_start", "ts_end", "sport", "notes", "status", "created_at"]
+    return [{k: v for k, v in zip(cols, r)} for r in rows]
+
+
+def get_athlete_profiles_bulk(athlete_ids: list) -> dict:
+    """Devuelve {athlete_id: profile_dict} para una lista de IDs. 1 query en lugar de N."""
+    if not athlete_ids:
+        return {}
+    placeholders = ",".join("?" * len(athlete_ids))
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            f"SELECT id, athlete_profile_json FROM users WHERE id IN ({placeholders})",
+            athlete_ids,
+        )
+        rows = cur.fetchall()
+    result = {}
+    base = _default_athlete_profile()
+    for uid, raw in rows:
+        profile = base.copy()
+        try:
+            data = json.loads(raw) if raw else {}
+            if isinstance(data, dict):
+                for k in profile.keys():
+                    v = data.get(k)
+                    profile[k] = v if v not in ("", [], None) else None
+        except Exception:
+            pass
+        result[uid] = profile
+    return result
 
 
 def get_previous_session(athlete_id: int, session_id: int):
@@ -1266,6 +1846,39 @@ def get_user_sensors(uid: int):
     return [r[0] for r in rows]
 
 
+def get_user_sensors_bulk(user_ids: list) -> dict:
+    ids = []
+    seen = set()
+    for raw in user_ids or []:
+        try:
+            uid = int(raw)
+        except Exception:
+            continue
+        if uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    if not ids:
+        return {}
+
+    out = {uid: [] for uid in ids}
+    with _get_conn() as con:
+        cur = con.cursor()
+        for i in range(0, len(ids), 800):
+            chunk = ids[i:i + 800]
+            placeholders = ",".join("?" * len(chunk))
+            cur.execute(
+                f"""SELECT user_id, sensor_code
+                    FROM user_sensors
+                    WHERE user_id IN ({placeholders})
+                    ORDER BY user_id, sensor_code""",
+                chunk,
+            )
+            for uid, sensor_code in cur.fetchall():
+                out.setdefault(int(uid), []).append(sensor_code)
+    return out
+
+
 def set_user_sensors(uid: int, codes):
     codes = codes or []
     with _get_conn() as con:
@@ -1276,6 +1889,20 @@ def set_user_sensors(uid: int, codes):
                 "INSERT INTO user_sensors(user_id,sensor_code) VALUES(?,?)",
                 (uid, c),
             )
+
+
+def add_user_sensor(uid: int, code: str) -> bool:
+    """Asigna un sensor a un usuario sin borrar los sensores existentes."""
+    clean = str(code or "").strip().upper()
+    if not uid or not clean:
+        return False
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO user_sensors(user_id,sensor_code) VALUES(?,?)",
+            (int(uid), clean),
+        )
+        return cur.rowcount > 0
 
 
 # ======================
@@ -1366,6 +1993,57 @@ def get_user_devices(user_id: int) -> list:
             except Exception:
                 r["computed_status"] = "paired"
     return rows
+
+
+def get_user_devices_bulk(user_ids: list) -> dict:
+    ids = []
+    seen = set()
+    for raw in user_ids or []:
+        try:
+            uid = int(raw)
+        except Exception:
+            continue
+        if uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    if not ids:
+        return {}
+
+    out = {uid: [] for uid in ids}
+    now = datetime.utcnow()
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        for i in range(0, len(ids), 800):
+            chunk = ids[i:i + 800]
+            placeholders = ",".join("?" * len(chunk))
+            cur.execute(
+                f"""SELECT id, user_id, sensor_code, device_id, device_label,
+                           status, last_seen, firmware_version, notes, created_at
+                    FROM sensor_devices
+                    WHERE user_id IN ({placeholders})
+                    ORDER BY user_id, sensor_code, created_at""",
+                chunk,
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                ls = item.get("last_seen")
+                if not ls:
+                    item["computed_status"] = "paired"
+                else:
+                    try:
+                        delta = (now - datetime.fromisoformat(ls)).total_seconds()
+                        if delta < 300:
+                            item["computed_status"] = "connected"
+                        elif delta < 3600:
+                            item["computed_status"] = "idle"
+                        else:
+                            item["computed_status"] = "offline"
+                    except Exception:
+                        item["computed_status"] = "paired"
+                out.setdefault(int(item["user_id"]), []).append(item)
+    return out
 
 
 def get_device_by_id(device_id: str, user_id: int) -> dict:
@@ -1556,6 +2234,103 @@ def get_last_ecg_metrics(uid: int):
     return {"bpm": row[0], "sdnn": row[1], "rmssd": row[2]}
 
 
+def get_last_ecg_metrics_bulk(user_ids: list) -> dict:
+    ids = []
+    seen = set()
+    for raw in user_ids or []:
+        try:
+            uid = int(raw)
+        except Exception:
+            continue
+        if uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    if not ids:
+        return {}
+
+    out = {}
+    with _get_conn() as con:
+        cur = con.cursor()
+        for i in range(0, len(ids), 800):
+            chunk = ids[i:i + 800]
+            placeholders = ",".join("?" * len(chunk))
+            cur.execute(
+                f"""
+                SELECT f.user_id, m.bpm, m.sdnn, m.rmssd
+                FROM ecg_metrics m
+                JOIN ecg_files f ON f.id = m.ecg_file_id
+                JOIN (
+                    SELECT f2.user_id, MAX(m2.id) AS max_id
+                    FROM ecg_metrics m2
+                    JOIN ecg_files f2 ON f2.id = m2.ecg_file_id
+                    WHERE f2.user_id IN ({placeholders})
+                    GROUP BY f2.user_id
+                ) latest ON latest.max_id = m.id
+                """,
+                chunk,
+            )
+            for row in cur.fetchall():
+                out[int(row[0])] = {"bpm": row[1], "sdnn": row[2], "rmssd": row[3]}
+    return out
+
+
+def get_latest_ecg_metrics_for_file(ecg_file_id: int):
+    if not ecg_file_id:
+        return None
+    metrics = list_latest_ecg_metrics_for_files([int(ecg_file_id)])
+    return metrics.get(int(ecg_file_id))
+
+
+def list_latest_ecg_metrics_for_files(file_ids: list) -> dict:
+    """
+    Devuelve la ultima metrica guardada por archivo ECG en una sola pasada.
+    Evita N queries y recalculos pesados de CSV en vistas de comparacion/reportes.
+    """
+    ids = []
+    seen = set()
+    for raw in file_ids or []:
+        try:
+            fid = int(raw)
+        except Exception:
+            continue
+        if fid in seen:
+            continue
+        seen.add(fid)
+        ids.append(fid)
+    if not ids:
+        return {}
+
+    out = {}
+    with _get_conn() as con:
+        cur = con.cursor()
+        for i in range(0, len(ids), 800):
+            chunk = ids[i:i + 800]
+            placeholders = ",".join("?" * len(chunk))
+            cur.execute(
+                f"""
+                SELECT m.ecg_file_id, m.bpm, m.sdnn, m.rmssd, m.n_peaks, m.created_at
+                FROM ecg_metrics m
+                JOIN (
+                    SELECT ecg_file_id, MAX(id) AS max_id
+                    FROM ecg_metrics
+                    WHERE ecg_file_id IN ({placeholders})
+                    GROUP BY ecg_file_id
+                ) latest ON latest.max_id = m.id
+                """,
+                chunk,
+            )
+            for row in cur.fetchall():
+                out[int(row[0])] = {
+                    "bpm": row[1],
+                    "sdnn": row[2],
+                    "rmssd": row[3],
+                    "n_peaks": row[4],
+                    "created_at": row[5],
+                }
+    return out
+
+
 # ======================
 # Questionnaires
 # ======================
@@ -1581,15 +2356,19 @@ def save_questionnaire(uid: int, answers: dict,
             )
 
 
-def list_questionnaires(uid: int):
+def list_questionnaires(uid: int, limit: int | None = None):
     # ✅ FIX: fetchall dentro del with
     with _get_conn() as con:
         cur = con.cursor()
-        cur.execute(
+        sql = (
             "SELECT id,user_id,ts,answers_json,wellness_score,rpe,duration_min "
-            "FROM questionnaires WHERE user_id=? ORDER BY id DESC",
-            (uid,),
+            "FROM questionnaires WHERE user_id=? ORDER BY id DESC"
         )
+        params = (uid,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (uid, int(limit))
+        cur.execute(sql, params)
         rows = cur.fetchall()
 
     out = []
@@ -1605,6 +2384,32 @@ def list_questionnaires(uid: int):
                 "duration_min": r[6],
             }
         )
+    return out
+
+
+def list_questionnaires_bulk(user_ids: list) -> dict:
+    """Single query to fetch questionnaires for multiple users. Returns {user_id: [rows]}."""
+    if not user_ids:
+        return {}
+    ids = [int(uid) for uid in user_ids]
+    placeholders = ",".join("?" * len(ids))
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            f"SELECT id,user_id,ts,answers_json,wellness_score,rpe,duration_min "
+            f"FROM questionnaires WHERE user_id IN ({placeholders}) ORDER BY id DESC",
+            ids,
+        )
+        rows = cur.fetchall()
+    out: dict = {}
+    for r in rows:
+        uid = r[1]
+        if uid not in out:
+            out[uid] = []
+        out[uid].append({
+            "id": r[0], "user_id": r[1], "ts": r[2], "answers_json": r[3],
+            "wellness_score": r[4], "rpe": r[5], "duration_min": r[6],
+        })
     return out
 
 
@@ -1711,7 +2516,9 @@ def delete_weight_entry(entry_id: int, user_id: int = None):
             cur.execute("DELETE FROM weights WHERE id=? AND user_id=?", (int(entry_id), int(user_id)))
 
 
-def add_nutrition_entry(user_id: int, date: str, adherence_pct: float, kcal: float = None, note: str = None):
+def add_nutrition_entry(user_id: int, date: str, adherence_pct: float, kcal: float = None,
+                        note: str = None, protein_g: float = None, carbs_g: float = None,
+                        fats_g: float = None, water_ml: float = None):
     """
     Guarda un registro de nutrición persistente (DB).
     - adherence_pct: 0..100
@@ -1726,8 +2533,9 @@ def add_nutrition_entry(user_id: int, date: str, adherence_pct: float, kcal: flo
         cur = con.cursor()
         cur.execute(
             """
-            INSERT INTO nutrition_logs(user_id, date, adherence_pct, kcal, note, created_at)
-            VALUES(?,?,?,?,?,?)
+            INSERT INTO nutrition_logs(user_id, date, adherence_pct, kcal, note, created_at,
+                                       protein_g, carbs_g, fats_g, water_ml)
+            VALUES(?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 int(user_id),
@@ -1736,6 +2544,10 @@ def add_nutrition_entry(user_id: int, date: str, adherence_pct: float, kcal: flo
                 float(kcal) if kcal is not None else None,
                 (note or "").strip() or None,
                 datetime.utcnow().isoformat(),
+                float(protein_g) if protein_g is not None else None,
+                float(carbs_g)   if carbs_g   is not None else None,
+                float(fats_g)    if fats_g     is not None else None,
+                float(water_ml)  if water_ml   is not None else None,
             ),
         )
         return cur.lastrowid
@@ -1751,7 +2563,8 @@ def list_nutrition_entries(user_id: int, limit: int = 200):
         cur = con.cursor()
         cur.execute(
             """
-            SELECT id, user_id, date, adherence_pct, kcal, note, created_at
+            SELECT id, user_id, date, adherence_pct, kcal, note, created_at,
+                   protein_g, carbs_g, fats_g, water_ml
             FROM nutrition_logs
             WHERE user_id=?
             ORDER BY date DESC, id DESC
@@ -1769,6 +2582,10 @@ def list_nutrition_entries(user_id: int, limit: int = 200):
             "adherence": r[3],
             "kcal": r[4],
             "note": r[5],
+            "protein_g": r[7] if len(r) > 7 else None,
+            "carbs_g":   r[8] if len(r) > 8 else None,
+            "fats_g":    r[9] if len(r) > 9 else None,
+            "water_ml":  r[10] if len(r) > 10 else None,
             "created_at": r[6],
         }
         for r in rows
@@ -1778,6 +2595,60 @@ def list_nutrition_entries(user_id: int, limit: int = 200):
 def get_latest_nutrition_entry(user_id: int):
     rows = list_nutrition_entries(int(user_id), limit=1)
     return rows[0] if rows else None
+
+
+def upsert_nutrition_feedback(athlete_id: int, coach_id: int, week_start: str, note: str = None):
+    """Guarda o actualiza la validación semanal de dieta de un coach sobre un atleta."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """
+            INSERT INTO nutrition_coach_feedback
+                (athlete_id, coach_id, week_start, note, validated_at, created_at)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(athlete_id, coach_id, week_start)
+            DO UPDATE SET note=excluded.note, validated_at=excluded.validated_at
+            """,
+            (int(athlete_id), int(coach_id), str(week_start),
+             (note or "").strip() or None, now, now),
+        )
+        return cur.lastrowid
+
+
+def get_latest_nutrition_feedback(athlete_id: int, coach_id: int = None):
+    """Devuelve la validación más reciente para un atleta (opcionalmente filtrada por coach)."""
+    with _get_conn() as con:
+        cur = con.cursor()
+        if coach_id:
+            cur.execute(
+                """
+                SELECT f.id, f.athlete_id, f.coach_id, f.week_start,
+                       f.note, f.validated_at, f.created_at, u.name AS coach_name
+                FROM nutrition_coach_feedback f
+                JOIN users u ON u.id = f.coach_id
+                WHERE f.athlete_id=? AND f.coach_id=?
+                ORDER BY f.week_start DESC LIMIT 1
+                """,
+                (int(athlete_id), int(coach_id)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT f.id, f.athlete_id, f.coach_id, f.week_start,
+                       f.note, f.validated_at, f.created_at, u.name AS coach_name
+                FROM nutrition_coach_feedback f
+                JOIN users u ON u.id = f.coach_id
+                WHERE f.athlete_id=?
+                ORDER BY f.week_start DESC LIMIT 1
+                """,
+                (int(athlete_id),),
+            )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
 
 
 def delete_nutrition_entry(entry_id: int, user_id: int = None):
@@ -1798,75 +2669,163 @@ def delete_nutrition_entry(entry_id: int, user_id: int = None):
 # Métricas IMU / EMG / RESP
 # ======================
 
-def save_imu_metrics(user_id, filename, n_hits, hits_per_min, mean_int_g, max_int_g, session_id: int = None):
+def save_imu_metrics(user_id, filename, n_hits, hits_per_min, mean_int_g, max_int_g,
+                     session_id: int = None, sensor_type: str = None,
+                     mean_ang_vel: float = None, max_ang_vel: float = None):
     if not user_id:
         return
     with _get_conn() as con:
         cur = con.cursor()
+        cols = ["user_id", "filename", "n_hits", "hits_per_min", "mean_int_g", "max_int_g"]
+        vals = [int(user_id), filename, int(n_hits),
+                float(hits_per_min), float(mean_int_g), float(max_int_g)]
         if _has_column(con, "imu_metrics", "session_id"):
-            cur.execute(
-                """
-                INSERT INTO imu_metrics (user_id, filename, n_hits, hits_per_min, mean_int_g, max_int_g, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (int(user_id), filename, int(n_hits),
-                 float(hits_per_min), float(mean_int_g), float(max_int_g), session_id),
-            )
-        else:
-            cur.execute(
-                """
-                INSERT INTO imu_metrics (user_id, filename, n_hits, hits_per_min, mean_int_g, max_int_g)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (int(user_id), filename, int(n_hits),
-                 float(hits_per_min), float(mean_int_g), float(max_int_g)),
-            )
+            cols.append("session_id"); vals.append(session_id)
+        if _has_column(con, "imu_metrics", "sensor_type"):
+            cols.append("sensor_type"); vals.append(sensor_type)
+        if _has_column(con, "imu_metrics", "mean_ang_vel") and mean_ang_vel is not None:
+            cols.append("mean_ang_vel"); vals.append(float(mean_ang_vel))
+        if _has_column(con, "imu_metrics", "max_ang_vel") and max_ang_vel is not None:
+            cols.append("max_ang_vel"); vals.append(float(max_ang_vel))
+        placeholders = ", ".join("?" * len(vals))
+        cur.execute(
+            f"INSERT INTO imu_metrics ({', '.join(cols)}) VALUES ({placeholders})",
+            vals,
+        )
 
 
-def list_imu_metrics(user_id):
+def list_imu_metrics(user_id, sensor_type: str = None):
     if not user_id:
         return []
     with _get_conn() as con:
         cur = con.cursor()
+        extra_cols = ""
+        for col in ("session_id", "sensor_type", "mean_ang_vel", "max_ang_vel"):
+            if _has_column(con, "imu_metrics", col):
+                extra_cols += f", {col}"
+        where = "WHERE user_id = ?"
+        params = [int(user_id)]
+        if sensor_type and _has_column(con, "imu_metrics", "sensor_type"):
+            where += " AND sensor_type = ?"
+            params.append(sensor_type)
         cur.execute(
-            """
-            SELECT id, filename, ts, n_hits, hits_per_min, mean_int_g, max_int_g
-            FROM imu_metrics
-            WHERE user_id = ?
-            ORDER BY datetime(ts) DESC
-            """,
-            (int(user_id),),
+            f"SELECT id, filename, ts, n_hits, hits_per_min, mean_int_g, max_int_g{extra_cols} "
+            f"FROM imu_metrics {where} ORDER BY datetime(ts) DESC",
+            params,
         )
-        rows = cur.fetchall()
-    return [
-        {
-            "id": r[0],
-            "filename": r[1],
-            "ts": r[2],
-            "n_hits": r[3],
-            "hits_per_min": r[4],
-            "mean_int_g": r[5],
-            "max_int_g": r[6],
-        }
-        for r in rows
-    ]
+        return list(_dicts(cur))
 
 
-def list_imu_metrics_by_session(session_id: int):
+def list_imu_metrics_by_session(session_id: int, sensor_type: str = None):
     with _get_conn() as con:
         cur = con.cursor()
         if not _has_column(con, "imu_metrics", "session_id"):
             return []
+        extra_cols = ""
+        for col in ("sensor_type", "mean_ang_vel", "max_ang_vel"):
+            if _has_column(con, "imu_metrics", col):
+                extra_cols += f", {col}"
+        where = "WHERE session_id = ?"
+        params = [int(session_id)]
+        if sensor_type and _has_column(con, "imu_metrics", "sensor_type"):
+            where += " AND sensor_type = ?"
+            params.append(sensor_type)
         cur.execute(
-            """
-            SELECT id, user_id, filename, ts, n_hits, hits_per_min, mean_int_g, max_int_g, session_id
-            FROM imu_metrics
-            WHERE session_id = ?
-            ORDER BY datetime(ts) DESC
-            """,
+            f"SELECT id, user_id, filename, ts, n_hits, hits_per_min, mean_int_g, max_int_g, session_id{extra_cols} "
+            f"FROM imu_metrics {where} ORDER BY datetime(ts) DESC",
+            params,
+        )
+        return list(_dicts(cur))
+
+
+# ── Sensor Sessions ────────────────────────────────────────────────────────────
+
+def open_sensor_session(session_id: int, sensor_code: str,
+                        device_id: int | None = None, ts_start: str | None = None) -> int:
+    """Abre una nueva sensor_session y devuelve su id."""
+    from datetime import datetime as _dt
+    ts = ts_start or _dt.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.execute(
+            "INSERT INTO sensor_sessions (session_id, sensor_code, device_id, ts_start) VALUES (?, ?, ?, ?)",
+            (int(session_id), sensor_code, device_id, ts),
+        )
+        return cur.lastrowid
+
+
+def close_sensor_session(sensor_session_id: int,
+                         sample_count: int = 0, status: str = "complete") -> None:
+    """Cierra una sensor_session con ts_end=ahora y estado final."""
+    from datetime import datetime as _dt
+    with _get_conn() as con:
+        con.execute(
+            "UPDATE sensor_sessions SET ts_end=?, status=?, sample_count=? WHERE id=?",
+            (_dt.utcnow().isoformat(), status, int(sample_count), int(sensor_session_id)),
+        )
+
+
+def record_sensor_sample(session_id: int, sensor_code: str,
+                         device_id: int | None = None) -> None:
+    """Registra un paquete recibido: crea la sensor_session si no existe, o incrementa su contador."""
+    with _get_conn() as con:
+        row = con.execute(
+            "SELECT id FROM sensor_sessions "
+            "WHERE session_id=? AND sensor_code=? AND status='collecting' "
+            "ORDER BY id DESC LIMIT 1",
+            (int(session_id), sensor_code),
+        ).fetchone()
+        if row:
+            con.execute(
+                "UPDATE sensor_sessions SET sample_count = sample_count + 1 WHERE id=?",
+                (row[0],),
+            )
+        else:
+            from datetime import datetime as _dt
+            con.execute(
+                "INSERT INTO sensor_sessions (session_id, sensor_code, device_id, sample_count) VALUES (?, ?, ?, 1)",
+                (int(session_id), sensor_code, device_id),
+            )
+
+
+def list_sensor_sessions(session_id: int) -> list:
+    """Devuelve todas las sensor_sessions de una sesión de entrenamiento."""
+    with _get_conn() as con:
+        cur = con.execute(
+            "SELECT id, session_id, device_id, sensor_code, ts_start, ts_end, "
+            "status, sample_count, notes, created_at "
+            "FROM sensor_sessions WHERE session_id=? ORDER BY ts_start",
             (int(session_id),),
         )
         return list(_dicts(cur))
+
+
+def get_sensor_data_summary(session_id: int) -> dict:
+    """Devuelve un dict por sensor_code con totales acumulados de todas sus sensor_sessions."""
+    summary: dict = {}
+    for r in list_sensor_sessions(session_id):
+        code = r["sensor_code"]
+        if code not in summary:
+            summary[code] = {
+                "sample_count": r.get("sample_count") or 0,
+                "ts_start":     r["ts_start"],
+                "ts_end":       r["ts_end"],
+                "status":       r["status"],
+            }
+        else:
+            summary[code]["sample_count"] += r.get("sample_count") or 0
+            if r["ts_start"] < summary[code]["ts_start"]:
+                summary[code]["ts_start"] = r["ts_start"]
+            if r["ts_end"] and (
+                not summary[code]["ts_end"]
+                or r["ts_end"] > summary[code]["ts_end"]
+            ):
+                summary[code]["ts_end"] = r["ts_end"]
+            if r["status"] == "collecting":
+                summary[code]["status"] = "collecting"
+    return summary
+
+
+# ─── fin sensor sessions ────────────────────────────────────────────────────
 
 
 def save_emg_metrics(user_id, filename, rms, peak, fatigue, session_id: int = None):
@@ -2043,6 +3002,10 @@ def get_weekly_load_summary(uid: int, days: int = 7):
         row = cur.fetchone()
         n_sessions = row[0] if row else 0
 
+    return _weekly_load_summary_from_rows(rows_cur, rows_prev, n_sessions)
+
+
+def _weekly_load_summary_from_rows(rows_cur: list, rows_prev: list, n_sessions: int) -> dict:
     wellness_vals = [r["wellness_score"] for r in rows_cur if r.get("wellness_score") is not None]
     wellness_avg = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else None
 
@@ -2083,24 +3046,92 @@ def get_weekly_load_summary(uid: int, days: int = 7):
     }
 
 
+def get_weekly_load_summary_bulk(user_ids: list, days: int = 7) -> dict:
+    """Carga semanal para multiples atletas sin N+1 queries."""
+    import datetime
+    ids = []
+    seen = set()
+    for raw in user_ids or []:
+        try:
+            uid = int(raw)
+        except Exception:
+            continue
+        if uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    if not ids:
+        return {}
+
+    now = datetime.datetime.utcnow()
+    cutoff_cur = (now - datetime.timedelta(days=days)).isoformat()
+    cutoff_prev = (now - datetime.timedelta(days=days * 2)).isoformat()
+    placeholders = ",".join("?" * len(ids))
+
+    rows_cur_by_uid = {uid: [] for uid in ids}
+    rows_prev_by_uid = {uid: [] for uid in ids}
+    sessions_by_uid = {uid: 0 for uid in ids}
+
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            f"""
+            SELECT user_id, wellness_score, rpe, duration_min, ts
+            FROM questionnaires
+            WHERE user_id IN ({placeholders})
+              AND datetime(ts) >= datetime(?)
+            ORDER BY user_id, ts DESC
+            """,
+            [*ids, cutoff_prev],
+        )
+        for row in cur.fetchall():
+            item = {
+                "wellness_score": row[1],
+                "rpe": row[2],
+                "duration_min": row[3],
+            }
+            if row[4] and row[4] >= cutoff_cur:
+                rows_cur_by_uid.setdefault(int(row[0]), []).append(item)
+            else:
+                rows_prev_by_uid.setdefault(int(row[0]), []).append(item)
+
+        cur.execute(
+            f"""
+            SELECT athlete_id, COUNT(*) AS n
+            FROM sessions
+            WHERE athlete_id IN ({placeholders})
+              AND datetime(ts_start) >= datetime(?)
+            GROUP BY athlete_id
+            """,
+            [*ids, cutoff_cur],
+        )
+        for row in cur.fetchall():
+            sessions_by_uid[int(row[0])] = row[1]
+
+    return {
+        uid: _weekly_load_summary_from_rows(
+            rows_cur_by_uid.get(uid, []),
+            rows_prev_by_uid.get(uid, []),
+            sessions_by_uid.get(uid, 0),
+        )
+        for uid in ids
+    }
+
+
 def get_team_weekly_summary(coach_id: int):
     """Devuelve lista de {atleta + resumen semanal} para el roster del coach,
     filtrado por el mismo deporte que el coach."""
     coach = get_user_by_id(int(coach_id))
-    coach_sport = (coach.get("sport") or "").strip().lower() if coach else ""
+    coach_sport = (coach.get("sport") or "").strip() if coach else ""
 
-    athletes = list_roster_for_coach(coach_id)
+    athletes = list_roster_for_coach(coach_id, sport=coach_sport or None)
+    summaries = get_weekly_load_summary_bulk([a.get("id") for a in athletes])
     result = []
     for a in athletes:
         aid = a.get("id")
         if not aid:
             continue
-        # Filtro por deporte: solo atletas del mismo deporte que el coach
-        if coach_sport:
-            athlete_sport = (a.get("sport") or "").strip().lower()
-            if athlete_sport != coach_sport:
-                continue
-        summary = get_weekly_load_summary(int(aid))
+        summary = summaries.get(int(aid)) or get_weekly_load_summary(int(aid))
         result.append({**a, "weekly": summary})
     return result
 
@@ -2138,10 +3169,6 @@ def get_load_history(uid: int, weeks: int = 4):
             row = cur.fetchone()
             wellness_avg = round(row[0], 1) if row and row[0] is not None else None
             load_raw = row[1] if row and row[1] else 0
-            has_load = any(
-                row and row[1]
-                for _ in [None]
-            )
             # re-query to detect if there was actual rpe*duration data
             cur.execute(
                 """
@@ -2392,9 +3419,9 @@ def ensure_demo_coach_boxeo() -> int:
 
     # Atletas: (email, nombre, sport, nivel, weight_cat, watch_zone, comp_prox)
     ATHLETES = [
-        ("demo-box-luis@combatiq.app",   "Luis Peña",    "Boxeo", "Competitivo",      "-69 kg",  "hombro derecho",   "Próximas 3-4 semanas"),
-        ("demo-box-sofia@combatiq.app",  "Sofía Vega",   "Boxeo", "Alto rendimiento", "-60 kg",  "muñeca izquierda", "Próximas 1-2 semanas"),
-        ("demo-box-marco@combatiq.app",  "Marco Díaz",   "Boxeo", "Iniciación",       "-75 kg",  "Sin zona crítica", "Sin competencia cercana"),
+        ("demo-box-luis@combatiq.app",   "Luis Peña",    "Box", "Competitivo",      "-69 kg",  "hombro derecho",   "Próximas 3-4 semanas"),
+        ("demo-box-sofia@combatiq.app",  "Sofía Vega",   "Box", "Alto rendimiento", "-60 kg",  "muñeca izquierda", "Próximas 1-2 semanas"),
+        ("demo-box-marco@combatiq.app",  "Marco Díaz",   "Box", "Iniciación",       "-75 kg",  "Sin zona crítica", "Sin competencia cercana"),
     ]
 
     SEEDS = [
@@ -2468,7 +3495,7 @@ def ensure_demo_coach_boxeo() -> int:
         else:
             cur.execute(
                 "INSERT INTO users (name, email, role, sport, password_hash, created_at) VALUES (?,?,?,?,?,?)",
-                (COACH_NAME, COACH_EMAIL, "coach", "Boxeo",
+                (COACH_NAME, COACH_EMAIL, "coach", "Box",
                  b"demo_no_auth", _dt.datetime.utcnow().isoformat()),
             )
             coach_id = cur.lastrowid
@@ -2542,3 +3569,702 @@ def save_rpe_entry(uid: int, rpe: float, duration_min: float = 0, session_id: in
             (int(uid), ts, answers, float(rpe), float(duration_min or 0), session_id),
         )
     return True
+
+
+# ======================
+# Announcements (comunicados in-app)
+# ======================
+
+def add_announcement(coach_id: int, sport: str, title: str, body: str = "", pinned: bool = False) -> int:
+    """Crea un comunicado del coach. Devuelve el id insertado."""
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO announcements(coach_id, sport, title, body, pinned, created_at) VALUES(?,?,?,?,?,?)",
+            (int(coach_id), sport or "", title, body or "", 1 if pinned else 0, ts),
+        )
+        return cur.lastrowid
+
+
+def list_announcements_for_coach(coach_id: int, limit: int = 30) -> list:
+    """Listado de comunicados enviados por este coach (más recientes primero)."""
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            "SELECT * FROM announcements WHERE coach_id=? ORDER BY pinned DESC, created_at DESC LIMIT ?",
+            (int(coach_id), limit),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def list_announcements_for_sport(sport: str, limit: int = 20) -> list:
+    """Comunicados visibles para deportistas de un deporte (más recientes primero)."""
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            "SELECT a.*, u.name AS coach_name FROM announcements a "
+            "LEFT JOIN users u ON u.id = a.coach_id "
+            "WHERE a.sport=? ORDER BY a.pinned DESC, a.created_at DESC LIMIT ?",
+            (sport or "", limit),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+# ======================
+# Notification preferences
+# ======================
+
+# ======================
+# Competition events
+# ======================
+
+def add_competition_event(user_id: int, name: str, event_date: str, sport: str = None,
+                          target_weight: float = None, location: str = None,
+                          notes: str = None) -> int:
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """INSERT INTO competition_events
+               (user_id, name, event_date, sport, target_weight, location, notes, created_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (int(user_id), name, event_date, sport or "", target_weight, location or "", notes or "", ts),
+        )
+        return cur.lastrowid
+
+
+def list_competition_events(user_id: int, upcoming_only: bool = False, limit: int = 20) -> list:
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        if upcoming_only:
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            cur.execute(
+                "SELECT * FROM competition_events WHERE user_id=? AND event_date >= ? "
+                "ORDER BY event_date ASC LIMIT ?",
+                (int(user_id), today, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM competition_events WHERE user_id=? ORDER BY event_date DESC LIMIT ?",
+                (int(user_id), limit),
+            )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_next_competition(user_id: int) -> dict | None:
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        cur.execute(
+            "SELECT * FROM competition_events WHERE user_id=? AND event_date >= ? "
+            "ORDER BY event_date ASC LIMIT 1",
+            (int(user_id), today),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def delete_competition_event(event_id: int, user_id: int) -> bool:
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM competition_events WHERE id=? AND user_id=?",
+            (int(event_id), int(user_id)),
+        )
+        return cur.rowcount > 0
+
+
+# ── Competition results (logros / trofeos) ──────────────────────────────────
+
+def add_competition_result(user_id: int, name: str, event_date: str,
+                           medal: str = "participant", category: str = None,
+                           location: str = None, notes: str = None) -> int:
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """INSERT INTO competition_results
+               (user_id, name, event_date, medal, category, location, notes, created_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (int(user_id), name, event_date,
+             medal or "participant", category or "", location or "", notes or "", ts),
+        )
+        return cur.lastrowid
+
+
+def list_competition_results(user_id: int) -> list:
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            "SELECT * FROM competition_results WHERE user_id=? ORDER BY event_date DESC",
+            (int(user_id),),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def delete_competition_result(result_id: int, user_id: int) -> bool:
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM competition_results WHERE id=? AND user_id=?",
+            (int(result_id), int(user_id)),
+        )
+        return cur.rowcount > 0
+
+
+def add_session_note(coach_id: int, athlete_id: int, note: str) -> int:
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO session_notes (coach_id, athlete_id, note, created_at) VALUES (?,?,?,?)",
+            (int(coach_id), int(athlete_id), note.strip(), ts),
+        )
+        return cur.lastrowid
+
+
+def list_session_notes(athlete_id: int, coach_id: int = None, limit: int = 10) -> list:
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        if coach_id:
+            cur.execute(
+                "SELECT * FROM session_notes WHERE athlete_id=? AND coach_id=? ORDER BY created_at DESC LIMIT ?",
+                (int(athlete_id), int(coach_id), limit),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM session_notes WHERE athlete_id=? ORDER BY created_at DESC LIMIT ?",
+                (int(athlete_id), limit),
+            )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_team_wellness_7d(coach_id: int, sport: str = None) -> list:
+    """Devuelve [{name, dates:[str], scores:[float]}] para los últimos 7 días."""
+    from datetime import timedelta, date as _date
+    today = _date.today()
+    cutoff = (today - timedelta(days=6)).isoformat()
+
+    athletes = list_roster_for_coach(int(coach_id), sport=sport) or []
+    athlete_ids = [int(a["id"]) for a in athletes if a.get("id") is not None]
+    if not athlete_ids:
+        return []
+
+    placeholders = ",".join("?" * len(athlete_ids))
+    rows_by_uid = {aid: [] for aid in athlete_ids}
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            f"""SELECT user_id, DATE(ts) as day, AVG(wellness_score) as avg_w
+               FROM questionnaires
+               WHERE user_id IN ({placeholders})
+                 AND DATE(ts) >= ?
+                 AND wellness_score IS NOT NULL
+               GROUP BY user_id, DATE(ts)
+               ORDER BY user_id, day ASC""",
+            [*athlete_ids, cutoff],
+        )
+        for row in cur.fetchall():
+            rows_by_uid.setdefault(int(row["user_id"]), []).append(row)
+
+    result = []
+    for a in athletes:
+        rows = rows_by_uid.get(int(a["id"]), [])
+        if rows:
+            result.append({
+                "name":   a["name"],
+                "dates":  [r["day"] for r in rows],
+                "scores": [round(float(r["avg_w"]), 1) for r in rows],
+            })
+    return result
+
+
+def get_red_streak_athletes(coach_id: int, days: int = 3, threshold: float = 50.0,
+                             sport: str = None) -> list:
+    """Devuelve atletas del coach con wellness < threshold en los últimos `days` días consecutivos."""
+    from datetime import timedelta
+    today = datetime.utcnow().date()
+    cutoff = (today - timedelta(days=days - 1)).isoformat()
+
+    athletes = list_roster_for_coach(int(coach_id), sport=sport) or []
+    athlete_ids = [int(a["id"]) for a in athletes if a.get("id") is not None]
+    if not athlete_ids:
+        return []
+
+    placeholders = ",".join("?" * len(athlete_ids))
+    rows_by_uid = {aid: [] for aid in athlete_ids}
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            f"""SELECT user_id, DATE(ts) as day, MIN(wellness_score) as min_w
+               FROM questionnaires
+               WHERE user_id IN ({placeholders}) AND DATE(ts) >= ?
+               GROUP BY user_id, DATE(ts)
+               ORDER BY user_id, day DESC""",
+            [*athlete_ids, cutoff],
+        )
+        for row in cur.fetchall():
+            rows_by_uid.setdefault(int(row["user_id"]), []).append(row)
+
+    red_athletes = []
+    for a in athletes:
+        rows = rows_by_uid.get(int(a["id"]), [])
+        if len(rows) >= days and all(float(r["min_w"] or 100) < threshold for r in rows[:days]):
+            a["consecutive_red"] = days
+            a["last_score"] = float(rows[0]["min_w"] or 0)
+            red_athletes.append(a)
+    return red_athletes
+
+
+def mark_onboarding_done(user_id: int) -> None:
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE users SET onboarding_done=1 WHERE id=?", (int(user_id),))
+
+
+def get_notification_prefs(user_id: int) -> dict:
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute("SELECT * FROM notification_prefs WHERE user_id=?", (int(user_id),))
+        row = cur.fetchone()
+    if row:
+        return dict(row)
+    return {
+        "user_id": user_id,
+        "low_wellness_alert": 1,
+        "announcement_notify": 1,
+        "checkin_reminder": 0,
+        "email_override": None,
+    }
+
+
+def save_notification_prefs(user_id: int, low_wellness_alert: bool,
+                             announcement_notify: bool, checkin_reminder: bool,
+                             email_override: str = None) -> None:
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            """INSERT INTO notification_prefs
+               (user_id, low_wellness_alert, announcement_notify, checkin_reminder, email_override, updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 low_wellness_alert=excluded.low_wellness_alert,
+                 announcement_notify=excluded.announcement_notify,
+                 checkin_reminder=excluded.checkin_reminder,
+                 email_override=excluded.email_override,
+                 updated_at=excluded.updated_at""",
+            (int(user_id),
+             1 if low_wellness_alert else 0,
+             1 if announcement_notify else 0,
+             1 if checkin_reminder else 0,
+             email_override or None,
+             ts),
+        )
+
+
+def delete_announcement(ann_id: int, coach_id: int) -> bool:
+    """Elimina un comunicado si pertenece a este coach."""
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM announcements WHERE id=? AND coach_id=?",
+            (int(ann_id), int(coach_id)),
+        )
+        return cur.rowcount > 0
+
+
+def get_readiness_score(uid: int) -> dict:
+    """
+    Competition readiness score 0-100 for an athlete.
+
+    Components:
+      Wellness average 7d  → 40 pts
+      Wellness trend       → 20 pts  (improving / stable / declining)
+      Load manageability   → 20 pts  (green/yellow/red flag)
+      Competition timing   → 20 pts  (days to next event)
+
+    Returns dict: score, label, color, breakdown, days_to_comp, next_event_name
+    """
+    from datetime import timedelta
+
+    summary = get_weekly_load_summary(uid, days=7)
+    wellness_avg  = summary.get("wellness_avg")     # None or 0-100
+    trend         = summary.get("trend", "stable")  # up/down/stable
+    flag          = summary.get("flag", "gray")
+
+    # ── Prior week wellness for trend comparison ──────────────────────────
+    now       = datetime.utcnow()
+    cutoff_7  = (now - timedelta(days=7)).isoformat()
+    cutoff_14 = (now - timedelta(days=14)).isoformat()
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            "SELECT AVG(wellness_score) as wa FROM questionnaires "
+            "WHERE user_id=? AND datetime(ts) >= datetime(?) AND datetime(ts) < datetime(?)",
+            (int(uid), cutoff_14, cutoff_7),
+        )
+        row = cur.fetchone()
+    wellness_prev = float(row["wa"]) if row and row["wa"] is not None else None
+
+    if wellness_avg is not None and wellness_prev is not None:
+        w_delta = wellness_avg - wellness_prev
+        w_trend_pts = 20 if w_delta > 5 else (10 if w_delta >= -5 else 0)
+    elif wellness_avg is not None:
+        w_trend_pts = 10   # no prior data — neutral
+    else:
+        w_trend_pts = 0
+
+    # ── Wellness average component ────────────────────────────────────────
+    w_avg_pts = round((wellness_avg / 100) * 40) if wellness_avg is not None else 10
+
+    # ── Load manageability ────────────────────────────────────────────────
+    load_pts = {"green": 20, "yellow": 10, "red": 0, "gray": 10}.get(flag, 10)
+
+    # ── Competition timing ────────────────────────────────────────────────
+    next_ev = get_next_competition(uid)
+    days_to_comp   = None
+    next_ev_name   = None
+    comp_pts       = 10  # neutral when no competition
+    if next_ev:
+        next_ev_name = next_ev.get("name", "Competencia")
+        try:
+            ev_date     = datetime.strptime(next_ev["event_date"][:10], "%Y-%m-%d").date()
+            days_to_comp = (ev_date - now.date()).days
+            if days_to_comp < 0:
+                comp_pts = 10   # passed — neutral
+            elif days_to_comp == 0:
+                comp_pts = 15   # competition day
+            elif days_to_comp <= 2:
+                comp_pts = 5    # final taper — rest, not push
+            elif days_to_comp <= 6:
+                comp_pts = 10   # immediate pre-comp
+            elif days_to_comp <= 13:
+                comp_pts = 15   # taper week
+            elif days_to_comp <= 21:
+                comp_pts = 20   # peak prep window
+            else:
+                comp_pts = 12   # general training cycle
+        except Exception:
+            comp_pts = 10
+
+    score = min(100, w_avg_pts + w_trend_pts + load_pts + comp_pts)
+
+    if score >= 85:
+        label, color = "Listo para competir", "#2fb7c4"
+    elif score >= 70:
+        label, color = "Buen estado", "#2fb7c4"
+    elif score >= 55:
+        label, color = "Forma moderada", "#f0a832"
+    elif score >= 40:
+        label, color = "Revisar carga", "#f0a832"
+    else:
+        label, color = "Recuperación activa", "#e45a5a"
+
+    return {
+        "score":          score,
+        "label":          label,
+        "color":          color,
+        "days_to_comp":   days_to_comp,
+        "next_event":     next_ev_name,
+        "breakdown": {
+            "wellness_avg_pts":  w_avg_pts,
+            "wellness_trend_pts": w_trend_pts,
+            "load_pts":          load_pts,
+            "comp_timing_pts":   comp_pts,
+        },
+    }
+
+
+def get_platform_metrics() -> dict:
+    """Métricas de uso de la plataforma para el panel interno/admin."""
+    from datetime import timedelta
+    now = datetime.utcnow()
+    iso24h = (now - timedelta(hours=24)).isoformat()
+    iso7d  = (now - timedelta(days=7)).isoformat()
+    iso30d = (now - timedelta(days=30)).isoformat()
+
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+
+        cur.execute("SELECT role, COUNT(*) as n FROM users GROUP BY role")
+        role_counts = {r["role"]: r["n"] for r in cur.fetchall()}
+
+        cur.execute(
+            "SELECT COUNT(DISTINCT user_id) as n FROM questionnaires WHERE ts >= ?",
+            (iso24h,),
+        )
+        dau = cur.fetchone()["n"]
+
+        cur.execute(
+            "SELECT COUNT(DISTINCT user_id) as n FROM questionnaires WHERE ts >= ?",
+            (iso7d,),
+        )
+        wau = cur.fetchone()["n"]
+
+        cur.execute(
+            "SELECT COUNT(*) as n FROM questionnaires WHERE ts >= ?",
+            (iso7d,),
+        )
+        checkins_7d = cur.fetchone()["n"]
+
+        cur.execute(
+            """SELECT DATE(ts) as day, COUNT(*) as n
+               FROM questionnaires WHERE ts >= ?
+               GROUP BY DATE(ts) ORDER BY day ASC""",
+            (iso30d,),
+        )
+        checkins_daily = [{"day": r["day"], "n": r["n"]} for r in cur.fetchall()]
+
+        cur.execute(
+            """SELECT COUNT(DISTINCT q.user_id) as n
+               FROM questionnaires q
+               JOIN users u ON u.id = q.user_id
+               WHERE q.ts >= ? AND u.role = 'deportista'""",
+            (iso7d,),
+        )
+        active_athletes_7d = cur.fetchone()["n"]
+
+        cur.execute(
+            "SELECT AVG(wellness_score) as avg FROM questionnaires "
+            "WHERE ts >= ? AND wellness_score IS NOT NULL",
+            (iso7d,),
+        )
+        row = cur.fetchone()
+        avg_wellness_7d = round(float(row["avg"]), 1) if row and row["avg"] is not None else None
+
+        cur.execute(
+            "SELECT COUNT(*) as n FROM users WHERE created_at >= ?",
+            (iso30d,),
+        )
+        new_users_30d = cur.fetchone()["n"]
+
+        cur.execute(
+            "SELECT sport, COUNT(*) as n FROM users "
+            "WHERE role='deportista' GROUP BY sport ORDER BY n DESC"
+        )
+        sport_dist = [{"sport": r["sport"] or "Sin definir", "n": r["n"]}
+                      for r in cur.fetchall()]
+
+        sessions_7d = 0
+        try:
+            cur.execute(
+                "SELECT COUNT(*) as n FROM sessions WHERE ts_start >= ?",
+                (iso7d,),
+            )
+            sessions_7d = cur.fetchone()["n"]
+        except Exception:
+            pass
+
+        cur.execute(
+            "SELECT COUNT(*) as n FROM questionnaires WHERE ts >= ?",
+            (iso30d,),
+        )
+        checkins_30d = cur.fetchone()["n"]
+
+        # WAU trend — 4 semanas completas (lunes-domingo)
+        from datetime import timedelta
+        wau_trend = []
+        for w in range(3, -1, -1):
+            week_end   = now - timedelta(days=w * 7)
+            week_start = week_end - timedelta(days=6)
+            cur.execute(
+                "SELECT COUNT(DISTINCT user_id) as n FROM questionnaires "
+                "WHERE ts >= ? AND ts < ?",
+                (week_start.isoformat(), (week_end + timedelta(days=1)).isoformat()),
+            )
+            wau_trend.append({
+                "label": f"S-{3-w}" if w > 0 else "Esta sem.",
+                "n": cur.fetchone()["n"],
+            })
+
+    return {
+        "total_athletes":    role_counts.get("deportista", 0),
+        "total_coaches":     role_counts.get("coach", 0),
+        "total_users":       sum(role_counts.values()),
+        "dau":               dau,
+        "wau":               wau,
+        "checkins_7d":       checkins_7d,
+        "checkins_30d":      checkins_30d,
+        "checkins_daily":    checkins_daily,
+        "active_athletes_7d": active_athletes_7d,
+        "avg_wellness_7d":   avg_wellness_7d,
+        "new_users_30d":     new_users_30d,
+        "sport_dist":        sport_dist,
+        "sessions_7d":       sessions_7d,
+        "wau_trend":         wau_trend,
+    }
+
+
+# ======================
+# Mensajes (chat interno)
+# ======================
+
+def send_message(sender_id: int, receiver_id: int, body: str) -> int:
+    """Guarda un mensaje y devuelve su ID."""
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO messages(sender_id, receiver_id, body, ts) VALUES(?,?,?,?)",
+            (int(sender_id), int(receiver_id), (body or "").strip(), ts),
+        )
+        return cur.lastrowid
+
+
+def list_conversation(user_a: int, user_b: int, limit: int = 60) -> list:
+    """Devuelve los últimos `limit` mensajes entre dos usuarios, orden cronológico."""
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            """SELECT * FROM messages
+               WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?)
+               ORDER BY ts DESC LIMIT ?""",
+            (int(user_a), int(user_b), int(user_b), int(user_a), limit),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    return list(reversed(rows))
+
+
+def list_conversations_for_coach(coach_id: int, sport: str = None) -> list:
+    """Lista los atletas que han intercambiado mensajes con el coach,
+    con el último mensaje y el conteo de no leídos.
+    Si se pasa `sport`, excluye conversaciones con atletas de otro deporte."""
+    sport_val = (sport or "").strip()
+    try:
+        with _get_conn() as con:
+            con.row_factory = sqlite3.Row
+            cur = con.cursor()
+            cur.execute(
+                """
+                WITH coach_msgs AS (
+                    SELECT
+                        id,
+                        CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id,
+                        body,
+                        ts
+                    FROM messages
+                    WHERE sender_id=? OR receiver_id=?
+                ),
+                latest_ids AS (
+                    SELECT other_id, MAX(id) AS last_id
+                    FROM coach_msgs
+                    GROUP BY other_id
+                ),
+                unread AS (
+                    SELECT sender_id AS other_id, COUNT(*) AS unread
+                    FROM messages
+                    WHERE receiver_id=? AND read_at IS NULL
+                    GROUP BY sender_id
+                )
+                SELECT
+                    cm.other_id AS user_id,
+                    COALESCE(u.name, '?') AS name,
+                    COALESCE(u.sport, '') AS sport,
+                    u.avatar_url AS avatar_url,
+                    cm.body AS last_msg,
+                    cm.ts AS last_ts,
+                    COALESCE(unread.unread, 0) AS unread
+                FROM latest_ids li
+                JOIN coach_msgs cm ON cm.id = li.last_id
+                LEFT JOIN users u ON u.id = cm.other_id
+                LEFT JOIN unread ON unread.other_id = cm.other_id
+                WHERE (? = '' OR COALESCE(u.sport, '') = '' OR u.sport = ?)
+                ORDER BY cm.ts DESC, cm.id DESC
+                """,
+                (
+                    int(coach_id), int(coach_id), int(coach_id), int(coach_id),
+                    sport_val, sport_val,
+                ),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "user_id":    r["user_id"],
+                "name":       r["name"] or "?",
+                "sport":      r["sport"] or "",
+                "avatar_url": r["avatar_url"],
+                "last_msg":   (r["last_msg"] or "")[:60],
+                "last_ts":    r["last_ts"] or "",
+                "unread":     int(r["unread"] or 0),
+            }
+            for r in rows
+        ]
+    except Exception:
+        pass
+
+    with _get_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute(
+            """SELECT DISTINCT
+                   CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END AS other_id
+               FROM messages WHERE sender_id=? OR receiver_id=?""",
+            (int(coach_id), int(coach_id), int(coach_id)),
+        )
+        other_ids = [r["other_id"] for r in cur.fetchall()]
+
+    result = []
+    for oid in other_ids:
+        user = get_user_by_id(int(oid)) or {}
+        if sport_val and user.get("sport") and user["sport"] != sport_val:
+            continue
+        msgs = list_conversation(int(coach_id), int(oid), limit=1)
+        unread = _count_unread_from(int(oid), int(coach_id))
+        result.append({
+            "user_id":    oid,
+            "name":       user.get("name", "—"),
+            "sport":      user.get("sport", ""),
+            "avatar_url": user.get("avatar_url"),
+            "last_msg":   msgs[-1]["body"][:60] if msgs else "",
+            "last_ts":    msgs[-1]["ts"] if msgs else "",
+            "unread":     unread,
+        })
+    return sorted(result, key=lambda x: x["last_ts"], reverse=True)
+
+
+def mark_messages_read(reader_id: int, sender_id: int) -> None:
+    """Marca como leídos todos los mensajes de sender_id hacia reader_id."""
+    ts = datetime.utcnow().isoformat()
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "UPDATE messages SET read_at=? WHERE sender_id=? AND receiver_id=? AND read_at IS NULL",
+            (ts, int(sender_id), int(reader_id)),
+        )
+
+
+def _count_unread_from(sender_id: int, receiver_id: int) -> int:
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM messages WHERE sender_id=? AND receiver_id=? AND read_at IS NULL",
+            (int(sender_id), int(receiver_id)),
+        )
+        row = cur.fetchone()
+    return row[0] if row else 0
+
+
+def get_unread_count(user_id: int) -> int:
+    """Total de mensajes no leídos dirigidos a este usuario."""
+    with _get_conn() as con:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM messages WHERE receiver_id=? AND read_at IS NULL",
+            (int(user_id),),
+        )
+        row = cur.fetchone()
+    return row[0] if row else 0

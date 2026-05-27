@@ -7,6 +7,8 @@ from flask import session
 
 import db
 import ui_charts as _uc
+import questionnaires as _Q
+from questionnaires import norm_sport as _norm_sport
 
 
 MONTHS_SHORT = [
@@ -69,15 +71,101 @@ def _format_dt(dt):
     return f"{dt.day:02d} {MONTHS_SHORT[dt.month - 1]} {dt.year}, {dt.strftime('%H:%M')}"
 
 
-def _questionnaire_rows(user_id):
+def _questionnaire_rows(user_id, _preloaded=None):
+    if _preloaded is not None:
+        return _preloaded
     try:
         return db.list_questionnaires(int(user_id)) or []
     except Exception:
         return []
 
 
-def _last_wellness(user_id):
-    rows = _questionnaire_rows(user_id)
+def _calc_streak(user_id, _rows=None) -> dict:
+    """Calcula racha actual y mejor racha de check-ins consecutivos."""
+    rows = _questionnaire_rows(user_id, _rows)
+    dates = sorted(set(
+        (r.get("ts") or "")[:10]
+        for r in rows if (r.get("ts") or "")[:10]
+    ), reverse=True)
+    if not dates:
+        return {"current": 0, "best": 0, "today": False}
+
+    today = datetime.datetime.utcnow().date()
+    streak = 0
+    for i, d in enumerate(dates):
+        try:
+            expected = today - datetime.timedelta(days=i)
+            if datetime.datetime.strptime(d, "%Y-%m-%d").date() == expected:
+                streak += 1
+            else:
+                break
+        except Exception:
+            break
+
+    # Mejor racha histórica
+    best = 0
+    run = 0
+    for i in range(len(dates)):
+        if i == 0:
+            run = 1
+        else:
+            try:
+                d0 = datetime.datetime.strptime(dates[i - 1], "%Y-%m-%d").date()
+                d1 = datetime.datetime.strptime(dates[i], "%Y-%m-%d").date()
+                if (d0 - d1).days == 1:
+                    run += 1
+                else:
+                    run = 1
+            except Exception:
+                run = 1
+        best = max(best, run)
+
+    today_done = bool(dates and dates[0] == today.isoformat())
+    return {"current": streak, "best": best, "today": today_done}
+
+
+def _streak_widget(streak: dict) -> html.Div:
+    """Tarjeta de racha para el home del atleta."""
+    cur = streak["current"]
+    best = streak["best"]
+    today_done = streak["today"]
+
+    if cur >= 30:
+        emoji, color, msg = "🔥", "var(--neon)", f"¡Racha legendaria! {cur} días seguidos."
+    elif cur >= 14:
+        emoji, color, msg = "🔥", "var(--neon)", f"¡Racha increíble! {cur} días sin fallar."
+    elif cur >= 7:
+        emoji, color, msg = "🔥", "#f0a832", f"Una semana seguida. ¡Sigue así!"
+    elif cur >= 3:
+        emoji, color, msg = "🔥", "#f0a832", f"{cur} días consecutivos. Buen ritmo."
+    elif cur == 1:
+        emoji, color, msg = "✓", "#2fb7c4", "Hoy ya está. Vuelve mañana para extender la racha."
+    else:
+        emoji, color, msg = "○", "var(--muted)", "Empieza el check-in de hoy para activar tu racha."
+
+    # Próximo hito
+    milestones = [3, 7, 14, 21, 30, 60, 90]
+    next_milestone = next((m for m in milestones if m > cur), None)
+    milestone_txt = f"{next_milestone - cur} días para el hito de {next_milestone} 🏆" if next_milestone else "¡Nivel máximo!"
+
+    return html.Div(className="streak-widget", children=[
+        html.Div(className="streak-widget__left", children=[
+            html.Span(emoji, className="streak-fire"),
+            html.Div(className="streak-nums", children=[
+                html.Span(str(cur), className="streak-cur", style={"color": color}),
+                html.Span(" días", className="streak-unit"),
+            ]),
+        ]),
+        html.Div(className="streak-widget__right", children=[
+            html.P(msg, className="streak-msg"),
+            html.P(milestone_txt, className="streak-milestone"),
+            html.P(f"Mejor racha: {best} días", className="streak-best"),
+        ]),
+    ])
+
+
+def _last_wellness(user_id, _rows=None):
+    rows = _questionnaire_rows(user_id, _rows)
     latest = None
     for row in rows:
         dt = _parse_ts(row.get("ts") or "")
@@ -87,26 +175,116 @@ def _last_wellness(user_id):
             latest = {
                 "dt": dt,
                 "score": row.get("wellness_score"),
+                "row": row,
             }
     if not latest:
         return {
             "value": "Sin datos",
             "sub": "Aún no hay cuestionarios registrados.",
             "detail": "Completa tu check-in para empezar a ver tu tendencia.",
+            "today_row": None,
         }
     score = latest["score"]
     value = f"{float(score):.0f}/100" if score is not None else "Sin dato"
+
+    today = datetime.datetime.utcnow().date()
+    today_row = latest["row"] if latest["dt"].date() == today else None
+
     return {
         "value": value,
         "sub": "Último check-in",
         "detail": f"Registrado el {_format_dt(latest['dt'])}.",
+        "today_row": today_row,
+        "latest_score": float(score) if score is not None else None,
     }
 
 
-def _count_checkins_7d(user_id):
+def _home_rec_banner(today_row, score, sport):
+    """
+    Miniatura de la recomendación del día en el home.
+    Solo aparece si el atleta ya hizo el check-in hoy.
+    """
+    if today_row is None or score is None:
+        return dcc.Link(
+            html.Div(
+                className="home-rec-banner home-rec-banner--pending",
+                children=[
+                    html.Span("○", className="home-rec-banner__icon"),
+                    html.Div([
+                        html.Div("Check-in pendiente", className="home-rec-banner__label"),
+                        html.Div(
+                            "Completa tu check-in del día para ver qué tipo de sesión te conviene hoy.",
+                            className="home-rec-banner__text",
+                        ),
+                    ]),
+                    html.Span("→", className="home-rec-banner__arrow"),
+                ],
+            ),
+            href="/cuestionario",
+            className="home-rec-banner__link",
+        )
+
+    sport_key = _norm_sport(sport)
+
+    if score >= 80:
+        color, icon = "var(--neon)", "▲"
+        label = "Listo para exigencia alta"
+        if sport_key == "taekwondo":
+            text = "Sparring técnico o simulación de combate — tienes explosividad y energía para sostenerlo."
+        elif sport_key == "boxeo":
+            text = "Saco de potencia y sparring técnico — buen día para medir timing bajo carga real."
+        else:
+            text = "Sesión de alta intensidad viable — buen momento para exigirte al máximo."
+    elif score >= 65:
+        color, icon = "#f0a832", "●"
+        label = "Intensidad controlada"
+        if sport_key == "taekwondo":
+            text = "Técnica de patada con calidad — distancia y precisión sobre explosividad hoy."
+        elif sport_key == "boxeo":
+            text = "Sombra técnica y saco al 75% — buena sesión para trabajar guardia y esquivas."
+        else:
+            text = "Sesión técnica a ritmo medio — calidad de movimiento sobre carga."
+    elif score >= 50:
+        color, icon = "#e45a5a", "▼"
+        label = "Ajusta la carga hoy"
+        if sport_key == "taekwondo":
+            text = "Técnica suave sin contacto — evita exigencia de explosividad máxima."
+        elif sport_key == "boxeo":
+            text = "Sombra técnica lenta, sin saco de potencia — cuida tus muñecas y hombros."
+        else:
+            text = "Reduce el volumen al 60-70% — prioriza la técnica y el descanso activo."
+    else:
+        color, icon = "var(--punch)", "⚠"
+        label = "Recuperación prioritaria"
+        if sport_key == "taekwondo":
+            text = "Sin impacto hoy — movilidad, estiramientos y habla con tu coach antes de entrenar."
+        elif sport_key == "boxeo":
+            text = "Sin guantes hoy — movilidad articular y recuperación activa."
+        else:
+            text = "Recuperación activa — no fuerces el entrenamiento hoy."
+
+    return html.Div(
+        className="home-rec-banner",
+        style={"borderLeftColor": color},
+        children=[
+            html.Span(icon, className="home-rec-banner__icon", style={"color": color}),
+            html.Div([
+                html.Div(label, className="home-rec-banner__label", style={"color": color}),
+                html.Div(text, className="home-rec-banner__text"),
+            ]),
+            html.Div(
+                f"{score:.0f}/100",
+                className="home-rec-banner__score",
+                style={"color": color},
+            ),
+        ],
+    )
+
+
+def _count_checkins_7d(user_id, _rows=None):
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=7)
     total = 0
-    for row in _questionnaire_rows(user_id):
+    for row in _questionnaire_rows(user_id, _rows):
         dt = _parse_ts(row.get("ts") or "")
         if dt and dt >= cutoff:
             total += 1
@@ -142,9 +320,9 @@ def _last_ecg(user_id):
     }
 
 
-def _athlete_trend_fig(user_id):
+def _athlete_trend_fig(user_id, _rows=None):
     pts = []
-    for row in _questionnaire_rows(user_id):
+    for row in _questionnaire_rows(user_id, _rows):
         dt = _parse_ts(row.get("ts") or "")
         score = row.get("wellness_score")
         if dt is None or score is None:
@@ -179,9 +357,9 @@ def _athlete_context_note(user_id):
     return f"Coach asignado: {coach_name}. Referencia principal: {sport}."
 
 
-def _coach_team_summary(coach_id):
+def _coach_team_summary(coach_id, sport=None):
     try:
-        athletes = db.list_athletes_for_coach(int(coach_id)) or []
+        athletes = db.list_roster_for_coach(int(coach_id), sport=sport) or []
     except Exception:
         athletes = []
 
@@ -196,11 +374,16 @@ def _coach_team_summary(coach_id):
     athletes_today = set()
     last_entry = None
 
-    for athlete in athletes:
-        athlete_id = athlete.get("id")
-        if athlete_id is None:
-            continue
-        for row in _questionnaire_rows(athlete_id):
+    # Single bulk query instead of one query per athlete
+    athlete_ids = [a["id"] for a in athletes if a.get("id") is not None]
+    name_map = {a["id"]: (a.get("name") or "Atleta") for a in athletes if a.get("id") is not None}
+    try:
+        bulk_qs = db.list_questionnaires_bulk(athlete_ids)
+    except Exception:
+        bulk_qs = {}
+
+    for athlete_id in athlete_ids:
+        for row in bulk_qs.get(athlete_id, []):
             dt = _parse_ts(row.get("ts") or "")
             if not dt:
                 continue
@@ -212,7 +395,7 @@ def _coach_team_summary(coach_id):
             if last_entry is None or dt > last_entry["dt"]:
                 last_entry = {
                     "dt": dt,
-                    "name": athlete.get("name") or "Atleta",
+                    "name": name_map.get(athlete_id, "Atleta"),
                     "score": row.get("wellness_score"),
                 }
 
@@ -378,19 +561,35 @@ def layout():
     if sport:
         meta_parts.append(sport)
     if role:
-        meta_parts.append("Coach" if role == "coach" else "Deportista")
+        meta_parts.append("Coach" if role == "coach" else ("Admin" if role == "admin" else "Deportista"))
+
+    _rec_banner = None  # populated only for athletes below
 
     if role == "coach":
-        team = _coach_team_summary(user_id)
-        hero_copy = (
-            "Aquí puedes ver cómo llega tu equipo hoy y qué te conviene revisar primero antes de pasar a otras vistas."
-        )
+        team = _coach_team_summary(user_id, sport=sport)
+        _sport_key = _norm_sport(sport)
+        if _sport_key == "taekwondo":
+            hero_copy = "Revisa quién llega con energía para patear y quién necesita un día más controlado."
+            flow_items = [
+                _flow_item("1", "Revisa el foco del día", "Detecta quién llega con menos explosividad o molestias en tren inferior.", "/usuarios"),
+                _flow_item("2", "Abre la sesión", "Define si hoy toca trabajar distancia, entrada-salida o simulación de combate.", "/sesion"),
+                _flow_item("3", "Baja a detalle si hace falta", "Usa análisis e histórico solo cuando aporten a la decisión táctica.", "/comparar"),
+            ]
+        elif _sport_key == "boxeo":
+            hero_copy = "Revisa quién llega con manos libres y si el equipo aguanta otro bloque de alta intensidad."
+            flow_items = [
+                _flow_item("1", "Revisa el foco del día", "Detecta quién llega con molestias de guardia o con carga acumulada alta.", "/usuarios"),
+                _flow_item("2", "Abre la sesión", "Define si hoy toca saco, sombra técnica o trabajo más controlado.", "/sesion"),
+                _flow_item("3", "Baja a detalle si hace falta", "Usa análisis e histórico solo cuando aporten a la decisión táctica.", "/comparar"),
+            ]
+        else:
+            hero_copy = "Aquí puedes ver cómo llega tu equipo hoy y qué te conviene revisar primero antes de pasar a otras vistas."
+            flow_items = [
+                _flow_item("1", "Revisa el foco del día", "Detecta quién llega con menos actividad o necesita seguimiento.", "/usuarios"),
+                _flow_item("2", "Abre la sesión", "Define contexto, objetivo y estructura del trabajo del equipo.", "/sesion"),
+                _flow_item("3", "Baja a detalle si hace falta", "Usa análisis e histórico solo cuando aporten a la decisión.", "/comparar"),
+            ]
         hero_badges = ["Coach", sport or "Deporte de combate"]
-        flow_items = [
-            _flow_item("1", "Revisa el foco del día", "Detecta quién llega con menos actividad o necesita seguimiento.", "/dashboard"),
-            _flow_item("2", "Abre la sesión", "Define contexto, objetivo y estructura del trabajo del equipo.", "/sesion"),
-            _flow_item("3", "Baja a detalle si hace falta", "Usa análisis e histórico solo cuando aporten a la decisión.", "/comparar"),
-        ]
         summary_card = _summary_card(
             "Así llega tu equipo hoy",
             "Una lectura rápida para revisar actividad reciente y no empezar el día a ciegas.",
@@ -422,25 +621,100 @@ def layout():
                 "Seguimiento",
                 "Si necesitas confirmar algo con más detalle, puedes entrar desde aquí.",
                 [
-                    ("Análisis de sesión", "/ecg", "signals.svg"),
-                    ("Histórico y comparación", "/comparar", "compare.svg"),
-                    ("Sensores", "/sensores", "sensors.svg"),
+                    ("Señales ECG / IMU", "/ecg", "signals.svg"),
+                    ("Comparar rendimiento", "/comparar", "compare.svg"),
+                    ("Historial de combates", "/sesiones", "history.svg"),
+                ],
+            ),
+        ]
+    elif role == "admin":
+        _rec_banner = None
+        _streak_card = None
+        hero_copy = "Vista ejecutiva de la plataforma: usuarios registrados, actividad reciente y estado general del sistema."
+        flow_items = [
+            _flow_item("1", "Métricas de plataforma", "DAU, WAU, engagement, distribución por deporte y bienestar general.", "/metricas"),
+            _flow_item("2", "Gestión de usuarios", "Alta de deportistas, asignación de coaches y roles.", "/usuarios"),
+            _flow_item("3", "Seguimiento de equipo", "Accede al dashboard de seguimiento como lo verían los coaches.", "/dashboard"),
+        ]
+        hero_badges = ["Admin", "CombatIQ"]
+        try:
+            _all_users = db.list_users() or []
+            _n_athletes = sum(1 for u in _all_users if u.get("role") == "deportista")
+            _n_coaches  = sum(1 for u in _all_users if u.get("role") == "coach")
+        except Exception:
+            _all_users, _n_athletes, _n_coaches = [], 0, 0
+        summary_card = _summary_card(
+            "Estado de la plataforma",
+            "Resumen rápido del estado actual. Para análisis detallado accede a las métricas.",
+            [
+                _summary_kpi("Usuarios", str(len(_all_users)), "Cuentas registradas"),
+                _summary_kpi("Deportistas", str(_n_athletes), "Atletas activos"),
+                _summary_kpi("Coaches", str(_n_coaches), "Entrenadores"),
+            ],
+            "Accede al panel de métricas para ver DAU, WAU, engagement y tendencias.",
+        )
+        chart_card = _chart_card(
+            "Panel de métricas",
+            "El panel de métricas incluye DAU, WAU, engagement y distribución por deporte.",
+            None,
+            "Accede al panel de métricas para ver el análisis completo de la plataforma.",
+        )
+        tool_groups = [
+            _tool_group(
+                "Administración",
+                "Accesos directos a las secciones clave de gestión de la plataforma.",
+                [
+                    ("Métricas", "/metricas", "signals.svg"),
+                    ("Usuarios", "/usuarios", "team.svg"),
+                    ("Anuncios", "/anuncios", "history.svg"),
+                ],
+            ),
+            _tool_group(
+                "Seguimiento",
+                "Vistas de rendimiento y bienestar de los atletas.",
+                [
+                    ("Dashboard", "/dashboard", "profile.svg"),
+                    ("Señales ECG / IMU", "/ecg", "signals.svg"),
+                    ("Comparar", "/comparar", "compare.svg"),
                 ],
             ),
         ]
     else:
-        wellness = _last_wellness(user_id)
+        # Fetch questionnaire rows once — reused by wellness, streak, trend, count
+        _qs_rows = _questionnaire_rows(user_id)
+        wellness = _last_wellness(user_id, _qs_rows)
         ecg = _last_ecg(user_id)
-        checkins_7d = _count_checkins_7d(user_id)
-        hero_copy = (
-            "Aquí puedes ver cómo llegas hoy, qué registros tienes recientes y qué te conviene revisar primero."
-        )
+        checkins_7d = _count_checkins_7d(user_id, _qs_rows)
+        _sport_key = _norm_sport(sport)
+        if _sport_key == "taekwondo":
+            hero_copy = "Revisa si llegas explosivo y sin molestias antes del primer round de hoy."
+            flow_items = [
+                _flow_item("1", "Mira tu estado", "Ve si llegas con piernas, sin fatiga y listo para patear a ritmo.", "/dashboard"),
+                _flow_item("2", "Abre tu sesión", "Ajusta el trabajo de distancia y patadas al objetivo del día.", "/sesion"),
+                _flow_item("3", "Compara cuando lo necesites", "Confirma tendencias de explosividad antes de un bloque competitivo.", "/comparar"),
+            ]
+        elif _sport_key == "boxeo":
+            hero_copy = "Revisa si llegas con manos libres y carga manejable antes de subir al saco."
+            flow_items = [
+                _flow_item("1", "Mira tu estado", "Ve si llegas ágil, sin molestias de guardia y con energía para los rounds.", "/dashboard"),
+                _flow_item("2", "Abre tu sesión", "Define si el foco hoy es técnica de manos, ritmo en saco o recuperación.", "/sesion"),
+                _flow_item("3", "Compara cuando lo necesites", "Confirma si el ritmo de golpeo ha mejorado antes de un bloque competitivo.", "/comparar"),
+            ]
+        else:
+            hero_copy = "Aquí puedes ver cómo llegas hoy, qué registros tienes recientes y qué te conviene revisar primero."
+            flow_items = [
+                _flow_item("1", "Mira tu estado", "Revisa cómo llegas hoy y cuándo fue tu último check-in.", "/dashboard"),
+                _flow_item("2", "Abre tu sesión", "Mantén claro el objetivo del día antes de pasar al análisis.", "/sesion"),
+                _flow_item("3", "Compara cuando lo necesites", "Usa histórico para confirmar tendencias, no como primer paso.", "/comparar"),
+            ]
         hero_badges = ["Deportista", sport or "Preparación diaria"]
-        flow_items = [
-            _flow_item("1", "Mira tu estado", "Revisa cómo llegas hoy y cuándo fue tu último check-in.", "/dashboard"),
-            _flow_item("2", "Abre tu sesión", "Mantén claro el objetivo del día antes de pasar al análisis.", "/sesion"),
-            _flow_item("3", "Compara cuando lo necesites", "Usa histórico para confirmar tendencias, no como primer paso.", "/comparar"),
-        ]
+        _rec_banner = _home_rec_banner(
+            wellness.get("today_row"),
+            wellness.get("latest_score"),
+            sport,
+        )
+        _streak = _calc_streak(user_id, _qs_rows)
+        _streak_card = _streak_widget(_streak)
         summary_card = _summary_card(
             "Estado de hoy",
             "Una vista rápida para entender tu estado del día sin tener que ir pantalla por pantalla.",
@@ -454,7 +728,7 @@ def layout():
         chart_card = _chart_card(
             "Tendencia de bienestar",
             "Sirve para ver si vienes estable o si tu estado ha cambiado en los últimos días.",
-            _athlete_trend_fig(user_id),
+            _athlete_trend_fig(user_id, _qs_rows),
             "Todavía no hay suficientes cuestionarios para mostrar una tendencia útil.",
         )
         tool_groups = [
@@ -462,9 +736,9 @@ def layout():
                 "Seguimiento",
                 "Aquí tienes a mano las vistas que más te ayudan a seguir tu evolución.",
                 [
-                    ("Análisis de sesión", "/ecg", "signals.svg"),
-                    ("Histórico y comparación", "/comparar", "compare.svg"),
-                    ("Histórico de wellbeing", "/historico", "history.svg"),
+                    ("Señales ECG / IMU", "/ecg", "signals.svg"),
+                    ("Comparar sesiones", "/comparar", "compare.svg"),
+                    ("Historial de wellbeing", "/historico", "history.svg"),
                 ],
             ),
             _tool_group(
@@ -473,7 +747,7 @@ def layout():
                 [
                     ("Peso", "/peso", "weight.svg"),
                     ("Nutrición", "/nutricion", "nutrition.svg"),
-                    ("Contacto con coach", "/contacto", "team.svg"),
+                    ("Chat con el coach", "/chat", "team.svg"),
                 ],
             ),
         ]
@@ -516,25 +790,29 @@ def layout():
                     ),
                 ],
             ),
+            _rec_banner,
+            _streak_card if role != "coach" else None,
             html.Div(className="home-overview-grid", children=[summary_card, chart_card]),
-            html.Div(
-                className="tiles-section",
+            html.Details(
+                className="tiles-section collapsible-card",
+                open=False,
                 children=[
-                    html.Div(
-                        className="tiles-section__head",
+                    html.Summary(
+                        className="collapsible-card__summary tiles-section__head",
                         children=[
-                            html.Div(
-                                [
-                                    html.P("Herramientas frecuentes", className="tiles-section-label"),
-                                    html.P(
-                                        "El menú lateral sigue siendo la navegación principal. Aquí solo dejamos algunos accesos útiles para entrar más rápido.",
-                                        className="tiles-section-copy",
-                                    ),
-                                ]
-                            )
+                            html.Div([
+                                html.P("Herramientas frecuentes", className="tiles-section-label"),
+                                html.P(
+                                    "Accesos rápidos — el menú lateral sigue siendo la navegación principal.",
+                                    className="tiles-section-copy",
+                                ),
+                            ]),
+                            html.Span("⌄", className="collapsible-card__chevron"),
                         ],
                     ),
-                    html.Div(tool_groups, className="tiles-group-grid"),
+                    html.Div(className="collapsible-card__body", children=[
+                        html.Div(tool_groups, className="tiles-group-grid"),
+                    ]),
                 ],
             ),
         ],

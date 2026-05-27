@@ -74,8 +74,22 @@ def _score_item(qdef: dict, value) -> float:
     return _norm_1_5(value)
 
 
+_SPORT_NORM: dict[str, str] = {
+    "taekwondo": "taekwondo",
+    "tkd":       "taekwondo",
+    "box":       "boxeo",
+    "boxeo":     "boxeo",
+    "boxing":    "boxeo",
+}
+
+
+def norm_sport(sport: str | None) -> str:
+    """Normaliza variantes de nombre de deporte al valor canónico usado en grupos."""
+    return _SPORT_NORM.get((sport or "").strip().lower(), (sport or "").strip().lower())
+
+
 def active_question_defs(sport: str | None = None, competition: bool = False, weight: bool = False, injury: bool = False) -> List[dict]:
-    sport = (sport or "").strip().lower()
+    sport = norm_sport(sport)
     active = []
     for q in QUESTION_DEFS:
         group = q["group"]

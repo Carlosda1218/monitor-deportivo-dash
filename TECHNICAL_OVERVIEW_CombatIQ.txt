@@ -1,0 +1,496 @@
+================================================================================
+TECHNICAL OVERVIEW — CombatIQ
+Plataforma de Monitoreo para Deportes de Combate
+Versión 1.0 · Mayo 2026
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+1. SYSTEM OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+CombatIQ es una plataforma web de monitoreo del rendimiento diseñada para
+deportistas y coaches de artes marciales de combate (Taekwondo y Boxeo).
+Integra datos biomédicos de sensores, check-ins de bienestar subjetivo e
+inteligencia artificial en un único sistema multi-rol accesible desde
+cualquier navegador.
+
+Funcionalidades Principales:
+
+1. Monitoreo de señales biomédicas — análisis de ECG/HRV (frecuencia cardíaca
+   y variabilidad) e IMU (detección de golpes, patadas e impactos recibidos).
+
+2. Check-in de bienestar inteligente — cuestionarios ponderados por deporte
+   que calculan un Wellness Score (0–100) pre-entrenamiento.
+
+3. Dashboard del coach — vista de equipo en tiempo real con alertas
+   automáticas, historial de sesiones y métricas de carga.
+
+4. Análisis de carga interna y externa — ACWR (ratio carga aguda:crónica),
+   readiness HRV, tendencias de volumen IMU y alertas por niveles
+   (ok / warning / danger).
+
+5. Insights narrativos con IA — integración con la API de Claude (Anthropic)
+   que genera análisis de coaching contextualizados al deporte y a los datos
+   del atleta.
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. ARQUITECTURA DEL SISTEMA
+────────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────┐
+│                       USUARIO                            │
+│      Navegador Web (Chrome / Safari / Firefox)           │
+│              Compatible con PWA (instalable)             │
+└─────────────────────────┬────────────────────────────────┘
+                          │  HTTP / HTTPS
+┌─────────────────────────▼────────────────────────────────┐
+│                      FRONTEND                            │
+│   Plotly Dash (Python) + CSS personalizado + JavaScript  │
+│   Layouts reactivos · Gráficas interactivas · DataTable  │
+└─────────────────────────┬────────────────────────────────┘
+                          │  Callbacks (Dash) + Rutas (Flask)
+┌─────────────────────────▼────────────────────────────────┐
+│                      BACKEND                             │
+│           Flask (Python) + Dash Server                   │
+│   Autenticación · Sesiones · API REST · Archivos         │
+│   analysis_engine.py · ai_insights.py (Claude API)       │
+└─────────────────────────┬────────────────────────────────┘
+                          │  SQL (sqlite3)
+┌─────────────────────────▼────────────────────────────────┐
+│                   BASE DE DATOS                          │
+│         SQLite — data/users.db — modo WAL                │
+│   20+ tablas · Migraciones versionadas (v10 → v210)      │
+└──────────────────────────────────────────────────────────┘
+
+Explicación por capa:
+
+- Usuario:      Navegador web estándar. La app es instalable en móvil como
+                Progressive Web App (PWA) sin pasar por ninguna tienda.
+
+- Frontend:     Plotly Dash 2.16 + Plotly 6.4. Componentes reactivos en
+                Python. Gráficas biomédicas interactivas, DataTables y
+                sliders de check-in. Estilos CSS propios con soporte de
+                tema oscuro y temas por rol (coach: ámbar, deportista: azul).
+
+- Backend:      Flask 3.0 sobre Python 3.11+. Gestiona sesiones de usuario,
+                autenticación con bcrypt, rutas REST internas para ingestión
+                de datos desde dispositivos externos (/api/sensor-data,
+                /api/sensor-ping) y carga de archivos CSV/JSON.
+
+- Base de datos: SQLite con modo WAL (Write-Ahead Logging) para reducir
+                bloqueos en entornos de múltiples usuarios. Las migraciones
+                son versionadas e idempotentes: se ejecutan automáticamente
+                al arrancar la app sin riesgo de pérdida de datos.
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. COMPONENTES DEL SISTEMA
+────────────────────────────────────────────────────────────────────────────────
+
+app.py
+------
+Punto de entrada principal. Inicializa el servidor Flask y la instancia Dash,
+registra el layout base multi-rol (deportista / coach) y define todos los
+callbacks reactivos. Gestiona la autenticación, la navegación entre páginas y
+orquesta las cuatro vistas modulares: SignalsView, SensorsView, CompareView y
+AnalysisView. También expone los endpoints REST internos para ingestión de datos
+desde dispositivos externos.
+
+db.py
+-----
+Capa completa de acceso a datos. Define todas las tablas SQLite y ejecuta
+migraciones versionadas de la v10 a la v210 de forma automática e idempotente
+al arrancar la app. Expone funciones CRUD para: usuarios, sesiones de
+entrenamiento, cuestionarios, métricas de sensores (ECG, IMU, EMG, RESP),
+equipos, mensajes internos, peso, nutrición y recuperación de contraseña
+mediante tokens temporales con expiración.
+
+sensors.py
+----------
+Catálogo declarativo de los sensores del sistema. Cada entrada define nombre,
+señales que produce, métricas calculadas, compatibilidad por deporte y ejemplos
+de hardware compatible. Los sensores disponibles son:
+
+  Código        Sensor                  Deporte         Métricas clave
+  ──────────    ──────────────────────  ──────────────  ──────────────────────────────────
+  ECG           Banda torácica ECG/HRV  TKD · Boxeo     BPM, SDNN, RMSSD, n_peaks
+  IMU_WRIST     IMU muñeca / guante     TKD · Boxeo     golpes/min, intensidad media (g)
+  IMU_FOOT      IMU tobillo / pie       TKD             patadas/min, potencia (g)
+  IMU_HEAD      IMU casco / cabeza      TKD · Boxeo     impactos recibidos, pico de g
+  HR_WRIST      FC reloj / pulsera      TKD · Boxeo     BPM promedio y máximo
+
+questionnaires.py
+-----------------
+Define 22 preguntas organizadas en 7 grupos temáticos: base, taekwondo, boxeo,
+competencia, peso y molestia. Cada pregunta tiene un peso numérico (3–14) y
+una dimensión (positive o risk). El módulo implementa el algoritmo de cálculo
+del Wellness Score (0–100): normaliza cada respuesta al rango 0–100, invierte
+las dimensiones de riesgo y pondera cada ítem según su peso relativo al deporte
+del atleta.
+
+analysis_engine.py
+------------------
+Motor de análisis que agrega datos históricos del atleta y genera un informe
+estructurado. Calcula: ACWR (ratio carga aguda:crónica de las últimas 7 vs 28
+sesiones), readiness HRV comparada contra la baseline rolling de 30 días,
+tendencias de volumen IMU y el listado de alertas automáticas clasificadas por
+nivel (ok, warning, danger). Incluye caché en memoria con TTL de 5 minutos.
+
+ai_insights.py
+--------------
+Integración con la API de Claude de Anthropic. Recibe el informe del
+analysis_engine y genera un análisis narrativo de coaching adaptado al deporte
+y al momento de la temporada. Implementa caché en memoria (10 min), timeout
+configurable (defecto 8 s) y degradación elegante: si no hay API key o falla
+la llamada, retorna un mensaje de aviso sin romper la UI.
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. FLUJO DE DATOS
+────────────────────────────────────────────────────────────────────────────────
+
+Flujo 1: Check-in de bienestar (deportista)
+-------------------------------------------
+1. El deportista autenticado navega a la página /wellbeing.
+2. El layout detecta su deporte (users.sport) y muestra solo las preguntas
+   relevantes (preguntas base + grupo específico del deporte).
+3. El deportista responde los sliders de 1–5 (energía, recuperación, sueño,
+   fatiga, etc.) y registra RPE y duración de la sesión anterior.
+4. questionnaires.compute_wellness_score(answers, sport) normaliza cada
+   respuesta a 0–100, invierte las dimensiones de riesgo y aplica los pesos.
+5. El score final (0–100) y el JSON de respuestas se persisten en la tabla
+   questionnaires junto al user_id, timestamp y session_id.
+6. analysis_engine.invalidate_cache(uid) limpia el caché del atleta.
+7. El dashboard del coach actualiza la vista del equipo: el wellness del atleta
+   aparece con su nivel de color (verde / naranja / rojo).
+8. Si ANTHROPIC_API_KEY está configurada, ai_insights.generate_coaching_note()
+   devuelve el análisis narrativo visible para el coach.
+
+Flujo 2: Análisis de señal ECG
+-------------------------------
+1. El coach o deportista sube el CSV de la banda torácica en la vista Signals.
+2. El backend lee el archivo, detecta la frecuencia de muestreo y registra el
+   archivo en ecg_files.
+3. analysis_engine carga las muestras y aplica scipy.signal.find_peaks() para
+   detectar los picos R de la señal.
+4. Se calculan los intervalos R–R y a partir de ellos: BPM, SDNN y RMSSD.
+5. Las métricas se guardan en ecg_metrics vinculadas al ecg_file_id y session_id.
+6. La vista Signals renderiza la señal ECG con los picos marcados y las métricas
+   en tarjetas de resumen.
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. MODELO DE DATOS
+────────────────────────────────────────────────────────────────────────────────
+
+Tablas:
+
+USERS
+  - id:                    Identificador único del usuario
+  - name:                  Nombre completo
+  - email:                 Correo electrónico (único)
+  - role:                  Rol del usuario: "deportista" o "coach"
+  - sport:                 Deporte: "taekwondo" o "boxeo"
+  - password_hash:         Hash bcrypt de la contraseña
+  - coach_id:              ID del coach asignado (relación legacy)
+  - avatar_url:            Foto de perfil en base64 o URL
+  - onboarding_done:       Flag de onboarding completado (0/1)
+
+QUESTIONNAIRES
+  - id:                    Identificador único del check-in
+  - user_id:               Referencia al deportista
+  - ts:                    Timestamp ISO del check-in
+  - answers_json:          JSON con todas las respuestas del cuestionario
+  - wellness_score:        Score calculado (0–100)
+  - rpe:                   Esfuerzo percibido de la sesión anterior (1–10)
+  - duration_min:          Duración de la sesión anterior en minutos
+  - session_id:            Sesión de entrenamiento asociada
+
+SESSIONS
+  - id:                    Identificador de la sesión
+  - athlete_id:            Deportista al que pertenece
+  - created_by:            Coach que la creó (opcional)
+  - ts_start / ts_end:     Timestamp de inicio y fin
+  - sport:                 Deporte de la sesión
+  - notes:                 Nombre o notas libres
+  - status:                Estado: "open" o "closed"
+
+ECG_FILES
+  - id:                    Identificador del archivo
+  - user_id:               Deportista propietario
+  - filename:              Nombre del archivo CSV en disco
+  - fs:                    Frecuencia de muestreo en Hz
+  - created_at:            Timestamp de carga
+  - session_id:            Sesión asociada
+
+ECG_METRICS
+  - id:                    Identificador de las métricas
+  - ecg_file_id:           Archivo ECG procesado
+  - bpm:                   Frecuencia cardíaca media
+  - sdnn:                  Variabilidad HRV global (ms)
+  - rmssd:                 Variabilidad HRV de corto plazo (ms)
+  - n_peaks:               Total de latidos detectados
+
+IMU_METRICS
+  - id:                    Identificador
+  - user_id:               Deportista
+  - filename:              Archivo fuente (JSON)
+  - ts:                    Timestamp del registro
+  - n_hits:                Total de impactos detectados
+  - hits_per_min:          Cadencia de golpes por minuto
+  - mean_int_g:            Intensidad media en g
+  - max_int_g:             Intensidad máxima en g
+  - sensor_type:           Tipo de sensor (muñeca, pie, cabeza)
+  - mean_ang_vel:          Velocidad angular media (rad/s)
+  - max_ang_vel:           Velocidad angular máxima (rad/s)
+  - session_id:            Sesión asociada
+
+Relación principal:
+Un usuario (role='deportista') pertenece a un coach vía coach_athletes (adopción)
+o por el campo legacy users.coach_id. Cada sesión agrupa las métricas del
+entrenamiento: enlaza con ecg_files, imu_metrics y questionnaires mediante
+session_id.
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. PROCESAMIENTO BIOMÉDICO
+────────────────────────────────────────────────────────────────────────────────
+
+Señal: ECG (electrocardiograma)
+
+  Parámetro   Significado                   Cálculo
+  ─────────   ──────────────────────────    ──────────────────────────────────────
+  BPM         Frecuencia cardíaca           Se detectan picos R con
+                                            scipy.signal.find_peaks() sobre la
+                                            señal filtrada. BPM = 60 / media
+                                            (intervalos R–R en segundos).
+
+  SDNN        HRV global                    Desviación estándar de todos los
+                                            intervalos R–R de la grabación.
+                                            Valores bajos indican fatiga.
+
+  RMSSD       HRV de corto plazo            Raíz del promedio de los cuadrados
+              (actividad parasimpática)     de las diferencias entre intervalos
+                                            R–R consecutivos. Indicador de
+                                            recuperación autonómica.
+
+  n_peaks     Total de latidos             Contador de picos R detectados.
+              detectados                   Sirve para validar calidad de señal.
+
+
+Señal: IMU (unidad de medición inercial)
+
+  Parámetro       Significado                Cálculo
+  ─────────────   ──────────────────────     ──────────────────────────────────────
+  n_hits          Total de golpes /          Magnitud vectorial: √(ax²+ay²+az²).
+                  patadas / impactos         Los picos ≥ 2 g se cuentan como
+                                             impactos.
+
+  hits_per_min    Cadencia (golpes/min)      n_hits / duración en minutos.
+                                             Indicador de volumen de trabajo.
+
+  mean_int_g /    Intensidad media y         Valor de pico de la magnitud en cada
+  max_int_g       máxima del impacto         impacto, en g (gravedades).
+
+  mean_ang_vel /  Velocidad angular media    Derivada del giroscopio triaxial.
+  max_ang_vel     y máxima                   Cuantifica la rapidez de rotación
+                                             del segmento corporal durante el
+                                             impacto.
+
+
+────────────────────────────────────────────────────────────────────────────────
+7. LIMITACIONES
+────────────────────────────────────────────────────────────────────────────────
+
+1. Base de datos SQLite: concurrencia limitada bajo cargas altas simultáneas
+   (múltiples coaches + atletas en la misma instancia). El modo WAL mejora la
+   situación pero no la elimina completamente.
+
+2. Sin integración BLE en tiempo real: la ingestión de ECG e IMU es
+   mayoritariamente manual (CSV/JSON upload). El hub BLE Nordic está en
+   fase de prototipo.
+
+3. Sin app móvil nativa: la plataforma es solo web (PWA instalable desde el
+   navegador). No existe versión iOS o Android publicada en tiendas de apps.
+
+4. Insights de IA opcionales: requieren ANTHROPIC_API_KEY activa. Sin ella la
+   sección de análisis narrativo no se muestra, pero el resto del sistema
+   funciona sin modificaciones.
+
+5. Análisis biomecánico por video (YOLO / MediaPipe) computacionalmente
+   intenso: no es apto para servidores sin GPU. Las estimaciones de pose se
+   realizan en modo offline sobre archivos de video previamente grabados.
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. MEJORAS
+────────────────────────────────────────────────────────────────────────────────
+
+Arquitectura:
+  Migrar a una arquitectura API REST + SPA (FastAPI en backend, React o Vue en
+  frontend) para desacoplar las capas y escalar cada una de forma independiente.
+  Introducir Redis como caché compartida para los informes del analysis_engine,
+  eliminando el caché en memoria no compartido entre procesos.
+
+Base de datos:
+  Migrar de SQLite a PostgreSQL cuando el número de atletas activos supere los
+  300 o cuando se despliegue en producción con múltiples coaches concurrentes.
+  Adoptar SQLAlchemy como ORM para simplificar las migraciones (Alembic) y
+  mejorar la cobertura de tests. La capa de migraciones versionadas que ya
+  existe en db.py puede reutilizarse para la transición sin pérdida de datos.
+
+Funcionalidad:
+  Integración BLE en tiempo real con transmisión desde wearables directamente
+  a la plataforma sin pasos manuales de carga. Notificaciones push al móvil del
+  coach cuando un atleta registra un wellness score bajo o un impacto de alto
+  riesgo. App móvil nativa (React Native) para el check-in diario del deportista.
+
+
+────────────────────────────────────────────────────────────────────────────────
+9. CONCLUSIONES
+────────────────────────────────────────────────────────────────────────────────
+
+Qué has aprendido:
+
+- Cómo construir un sistema web multi-rol real (coach / deportista) con
+  autenticación segura (bcrypt + tokens de sesión), navegación protegida y
+  separación de permisos por rol.
+
+- Procesamiento de señales biomédicas en Python: detección de picos R en ECG
+  con scipy, cálculo de parámetros HRV (SDNN, RMSSD) y detección de impactos
+  en señales IMU triaxiales.
+
+- Diseño de un esquema de base de datos evolutivo con migraciones versionadas
+  que permiten añadir funcionalidades en producción sin perder datos existentes.
+
+- Integración de modelos de IA generativa (Claude API) en el flujo de datos de
+  una aplicación real, con manejo de errores, caché y degradación elegante
+  cuando el servicio no está disponible.
+
+- Patrones de arquitectura reactiva con Plotly Dash: callbacks complejos con
+  múltiples inputs/outputs, estados compartidos y componentes dinámicos
+  por deporte.
+
+Qué mejorarías:
+
+- Separar el frontend del backend desde el inicio (API REST + cliente
+  independiente) para facilitar el testing y la escala horizontal.
+
+- Implementar WebSockets o Server-Sent Events para que el dashboard del coach
+  se actualice en tiempo real sin necesidad de recargar la página.
+
+- Añadir una suite de tests automatizados (pytest + coverage) desde el primer
+  día, especialmente para el Wellness Score y el pipeline de análisis ECG/IMU.
+
+- Usar PostgreSQL desde el despliegue inicial en lugar de migrar después, para
+  evitar trabajo de conversión de datos en producción.
+
+
+────────────────────────────────────────────────────────────────────────────────
+10. FORTALEZAS COMPETITIVAS — EN PALABRAS SIMPLES
+────────────────────────────────────────────────────────────────────────────────
+
+Este apartado explica por qué CombatIQ es diferente a lo que existe hoy, sin
+tecnicismos. Está pensado para que cualquier persona, sin importar su nivel
+técnico, entienda el valor de lo que se ha construido.
+
+
+¿QUÉ PROBLEMA RESUELVE?
+─────────────────────────
+Un coach de Taekwondo o Boxeo hoy trabaja así:
+
+  - Le pregunta al atleta "¿cómo te sientes?" y anota la respuesta en papel
+    o en un chat de WhatsApp.
+  - Sube datos de un sensor a una computadora, abre Excel y trata de
+    interpretar números sin contexto.
+  - No tiene forma de comparar cómo estaba el atleta hace tres semanas con
+    cómo está hoy.
+  - Si dirige un equipo de 15 personas, esa información está dispersa en
+    15 conversaciones distintas.
+
+CombatIQ reemplaza todo eso con una sola plataforma, ordenada y automática.
+
+
+LO QUE HACE COMBATIQ — SIN TECNICISMOS
+─────────────────────────────────────────
+Antes de cada entrenamiento, el deportista responde en su celular unas
+preguntas breves: ¿cómo dormiste?, ¿qué tan cansado llegas?, ¿sientes
+alguna molestia? La app convierte esas respuestas en un número del 0 al 100
+—el Wellness Score— que el coach ve al instante en su panel.
+
+Si el atleta también usó una banda en el pecho durante el entrenamiento,
+la app lee la señal del corazón y calcula automáticamente parámetros como
+la frecuencia cardíaca y la variabilidad (HRV), que son los indicadores más
+precisos que existen para saber si un deportista está recuperado o sobreentrenado.
+
+Si además llevó un sensor en la muñeca o el tobillo, la app cuenta cuántos
+golpes dio, a qué ritmo y con qué fuerza. Sin que nadie tenga que contar
+nada manualmente.
+
+Y al final, la inteligencia artificial —la misma tecnología que hay detrás
+de ChatGPT— lee todos esos datos juntos y le escribe al coach un párrafo
+en lenguaje natural explicando el estado del atleta y qué cuidados tiene
+que tener en el siguiente entrenamiento.
+
+
+POR QUÉ ES DIFÍCIL DE COPIAR
+──────────────────────────────
+No es solo una app de cuestionarios, ni solo un visualizador de sensores,
+ni solo un chat con IA. CombatIQ combina las tres cosas en un sistema
+coherente donde cada dato se entiende en contexto de los demás.
+
+Además, está construida específicamente para deportes de combate. Las
+preguntas del cuestionario, los umbrales de alerta, las métricas que se
+calculan y el lenguaje que usa la IA están pensados para Taekwondo y Boxeo,
+no para atletismo ni para fútbol. Eso hace que el coach sienta que la
+herramienta entiende su deporte.
+
+
+COMPARACIÓN CON LO QUE EXISTE HOY
+─────────────────────────────────────
+
+  ¿Qué tienen hoy?          ¿Qué problema tiene?     ¿Cómo lo resuelve CombatIQ?
+  ──────────────────────    ──────────────────────    ─────────────────────────────────────
+  Papel / WhatsApp          Sin historial, sin        Registro digital automático con
+                            análisis, se pierde       historial completo por sesión y
+                            la información            por atleta
+
+  Polar / Garmin solos      Solo miden ritmo          CombatIQ añade contexto: bienestar
+                            cardíaco, sin contexto    subjetivo + impactos + IA encima
+                            de entrenamiento          del dato de la banda
+
+  TrainingPeaks /           No son para deportes      Cuestionarios, alertas y métricas
+  Final Surge               de combate; sin IMU       calibradas para TKD y Boxeo
+                            ni detección de golpes
+
+  Excel del profe           Manual, tardado,          Automatización completa: datos
+                            sin alertas               entran solos, alertas salen solas
+
+
+LO QUE HACE QUE ESTO VALGA DINERO
+────────────────────────────────────
+1. Los datos son del equipo. A diferencia de aplicaciones de terceros donde
+   la información queda en servidores ajenos, aquí el equipo es dueño de
+   su propio historial de rendimiento.
+
+2. Prevención de lesiones. El sistema detecta patrones de sobrecarga
+   antes de que el atleta se lastime, no después. Un atleta lesionado
+   es tiempo perdido y resultados perdidos.
+
+3. Decisiones objetivas. El coach deja de adivinar si el atleta está listo
+   para una sesión exigente. Tiene un número, una tendencia y un análisis
+   escrito frente a él cada mañana.
+
+4. Escala sin esfuerzo extra. Da lo mismo si el equipo tiene 5 atletas o 50.
+   El coach ve el estado de todos en una sola pantalla, sin abrir 50 chats.
+
+5. Tecnología de vanguardia accesible. El uso de inteligencia artificial
+   para generar análisis de coaching no existe en ninguna herramienta
+   específica para deportes de combate en el mercado hispanohablante.
+
+
+================================================================================
+Documento elaborado en mayo de 2026 · CombatIQ — Monitoreo para Deportes de Combate
+================================================================================

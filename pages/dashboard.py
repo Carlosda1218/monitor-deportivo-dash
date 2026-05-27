@@ -1,9 +1,10 @@
-﻿from dash import html, dcc
+﻿from dash import html, dcc, Input, Output, State, callback
 from flask import session
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import db
 import ui_charts as _uc
+from questionnaires import norm_sport as _norm_sport
 
 
 def _to_str(v):
@@ -58,6 +59,30 @@ def _quick_link(label, href, primary=False):
         href=href,
         style={"display": "inline-block"}
     )
+
+
+def _avatar_img(avatar_url: str | None, name: str):
+    """Nodo imagen o iniciales (sin id fijo — el contenedor lleva el id)."""
+    if avatar_url:
+        return html.Img(src=avatar_url, className="avatar-circle")
+    initials = "".join(p[0] for p in (name or "?").split()[:2]).upper() or "?"
+    return html.Div(initials, className="avatar-initials")
+
+
+def _avatar_block(name: str, avatar_url: str | None):
+    """Círculo de avatar con fallback de iniciales y zona de upload encima."""
+    return html.Div(className="avatar-wrap", children=[
+        html.Div(className="avatar-upload-area", children=[
+            html.Div(id="avatar-display", children=[_avatar_img(avatar_url, name)]),
+            dcc.Upload(
+                id="avatar-upload",
+                accept="image/*",
+                className="avatar-upload-zone",
+                children=html.Div(),
+            ),
+        ]),
+        html.Div("Cambiar foto", className="avatar-upload-btn"),
+    ])
 
 
 # --- CS-021: Tarjeta compartible ---
@@ -151,12 +176,113 @@ def generate_share_card(name, sport, weekly_summary, load_history, competition_p
     _ann(metrics, 0.5, -0.24, 13, TEXT, anchor="center")
     _ann("combatiq.app", 0.98, -0.24, 10, MUTED, anchor="right")
 
+    def _fallback_png():
+        """Pillow fallback when Plotly/Kaleido cannot export images."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except Exception:
+            return None
+
+        width, height = 1200, 760
+        img = Image.new("RGB", (width, height), BG)
+        draw = ImageDraw.Draw(img)
+
+        def _font(size, bold=False):
+            candidates = [
+                r"C:\Windows\Fonts\segoeuib.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
+                r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
+            ]
+            for path in candidates:
+                try:
+                    return ImageFont.truetype(path, size=size)
+                except Exception:
+                    continue
+            return ImageFont.load_default()
+
+        f_title = _font(46, True)
+        f_head = _font(30, True)
+        f_body = _font(24)
+        f_small = _font(20)
+        f_tiny = _font(18)
+
+        draw.rounded_rectangle((34, 34, width - 34, height - 34), radius=34, fill="#111827", outline="#243447", width=2)
+        draw.rectangle((34, 34, 78, height - 34), fill=TEAL)
+
+        draw.text((108, 82), "CombatIQ", fill=TEAL, font=f_title)
+        if comp_text:
+            badge_w = max(260, len(comp_text) * 13)
+            draw.rounded_rectangle((width - badge_w - 90, 88, width - 90, 130), radius=18, fill=comp_color)
+            draw.text((width - badge_w - 70, 96), comp_text, fill=BG, font=f_tiny)
+
+        title = f"{name}{f' - {sport}' if sport else ''}"
+        if len(title) > 54:
+            title = title[:51] + "..."
+        draw.text((108, 154), title, fill=TEXT, font=f_head)
+        draw.text((108, 194), week_str.replace("·", "-"), fill=MUTED, font=f_small)
+
+        chart = (108, 272, width - 108, 552)
+        x0, y0, x1, y1 = chart
+        draw.rounded_rectangle((x0, y0, x1, y1), radius=24, fill="#0b1220", outline="#243447", width=2)
+
+        if has_load or has_wellness:
+            max_load = max(loads) if loads else 0
+            max_load = max(max_load, 1)
+            n = max(len(labels), 1)
+            gap = (x1 - x0 - 110) / max(n, 1)
+            bar_w = max(24, min(58, gap * 0.48))
+            base_y = y1 - 52
+            top_y = y0 + 46
+            chart_h = base_y - top_y
+            for idx, label in enumerate(labels):
+                cx = x0 + 62 + idx * gap + gap / 2
+                if idx < len(loads) and loads[idx] > 0:
+                    bh = int((loads[idx] / max_load) * chart_h)
+                    draw.rounded_rectangle(
+                        (cx - bar_w / 2, base_y - bh, cx + bar_w / 2, base_y),
+                        radius=10,
+                        fill=TEAL,
+                    )
+                draw.text((cx - 32, base_y + 14), str(label)[:9], fill=MUTED, font=f_tiny)
+
+            if has_wellness:
+                pts = []
+                for idx, val in enumerate(wellness):
+                    if val is None:
+                        continue
+                    cx = x0 + 62 + idx * gap + gap / 2
+                    cy = base_y - (float(val) / 100.0) * chart_h
+                    pts.append((cx, cy))
+                if len(pts) >= 2:
+                    draw.line(pts, fill=AMBER, width=6)
+                for cx, cy in pts:
+                    draw.ellipse((cx - 8, cy - 8, cx + 8, cy + 8), fill=AMBER)
+        else:
+            draw.text((x0 + 42, y0 + 108), "Sin datos semanales suficientes todavia.", fill=MUTED, font=f_body)
+
+        metric_y = 604
+        metric_cards = [
+            ("Sesiones", str(n_sessions)),
+            ("Carga", load_str),
+            ("Bienestar", wellness_str),
+        ]
+        card_w = 300
+        for idx, (label, value) in enumerate(metric_cards):
+            left = 108 + idx * (card_w + 32)
+            draw.rounded_rectangle((left, metric_y, left + card_w, metric_y + 92), radius=22, fill="#0b1220", outline="#243447", width=2)
+            draw.text((left + 24, metric_y + 18), value, fill=TEXT, font=f_head)
+            draw.text((left + 24, metric_y + 58), label.upper(), fill=MUTED, font=f_tiny)
+
+        draw.text((width - 250, height - 74), "combatiq.app", fill=MUTED, font=f_small)
+        out = io.BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+
     buf = io.BytesIO()
     try:
         fig.write_image(buf, format="png", width=600, height=380, scale=2)
         return buf.getvalue()
     except Exception:
-        return None
+        return _fallback_png()
 
 
 # --- CS-018: Gráfica de carga 4 semanas ---
@@ -261,6 +387,236 @@ _FLAG_COLORS = {"green": "#27c98f", "yellow": "#f0a832", "red": "#e45a5a", "gray
 _FLAG_LABELS = {"green": "En forma", "yellow": "Con atención", "red": "Revisar carga", "gray": "Sin datos"}
 _TREND_ICONS = {"up": "↑", "down": "↓", "stable": "→"}
 _TREND_LABELS = {"up": "Carga subiendo", "down": "Carga bajando", "stable": "Carga estable"}
+
+
+_MEDAL_EMOJI = {
+    "gold":        "🥇",
+    "silver":      "🥈",
+    "bronze":      "🥉",
+    "finalist":    "🏅",
+    "participant": "🎖️",
+}
+_MEDAL_LABEL = {
+    "gold":        "Oro",
+    "silver":      "Plata",
+    "bronze":      "Bronce",
+    "finalist":    "Finalista",
+    "participant": "Participante",
+}
+
+
+def _trophy_shelf(uid_int: int):
+    """Sala de trofeos: logros desbloqueados + próximas competencias como retos bloqueados."""
+    results = []
+    upcoming = []
+    try:
+        results = db.list_competition_results(uid_int) or []
+    except Exception:
+        pass
+    try:
+        all_events = db.list_competition_events(uid_int) or []
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        upcoming = [e for e in all_events if (e.get("event_date") or "") >= today_str]
+    except Exception:
+        pass
+
+    if not results and not upcoming:
+        return html.Div(className="card", children=[
+            html.H4("Sala de trofeos", className="card-title"),
+            html.P("Aquí aparecerán tus logros cuando termines y registres una competencia.", className="text-muted"),
+            html.Div(className="trophy-shelf", children=[
+                html.Div(className="trophy-card trophy-card--locked", children=[
+                    html.Div("🏆", className="trophy-badge trophy-badge--participant"),
+                    html.Div("Tu primer trofeo", className="trophy-name"),
+                    html.Span("Por desbloquear", className="trophy-lock-label"),
+                ]),
+            ]),
+        ])
+
+    cards = []
+    for r in results:
+        medal = (r.get("medal") or "participant").lower()
+        emoji = _MEDAL_EMOJI.get(medal, "🎖️")
+        label = _MEDAL_LABEL.get(medal, medal.capitalize())
+        cards.append(html.Div(className="trophy-card", children=[
+            html.Div(emoji, className=f"trophy-badge trophy-badge--{medal}"),
+            html.Span(label, className=f"trophy-medal-chip trophy-medal-chip--{medal}"),
+            html.Div(r.get("name", "Competencia"), className="trophy-name"),
+            html.Div(r.get("event_date", "")[:10], className="trophy-date"),
+            html.Div(r.get("category", ""), className="trophy-cat") if r.get("category") else None,
+            html.Div(r.get("location", ""), className="trophy-loc") if r.get("location") else None,
+        ]))
+
+    for e in upcoming[:3]:
+        days_left = ""
+        try:
+            from datetime import date as _date2, datetime as _dt2
+            d = _dt2.fromisoformat(e.get("event_date", "")).date()
+            diff = (d - _date2.today()).days
+            days_left = f"En {diff} días" if diff > 0 else "Hoy"
+        except Exception:
+            days_left = e.get("event_date", "")[:10]
+        cards.append(html.Div(className="trophy-card trophy-card--locked", children=[
+            html.Div("🏆", className="trophy-badge trophy-badge--participant"),
+            html.Div(e.get("name", "Próxima competencia"), className="trophy-name"),
+            html.Div(days_left, className="trophy-date"),
+            html.Span("Reto pendiente", className="trophy-lock-label"),
+        ]))
+
+    return html.Div(className="card", children=[
+        html.Div(className="card-title-row", children=[
+            html.H4("Sala de trofeos", className="card-title"),
+            html.Span(
+                f"{len(results)} logros desbloqueados",
+                style={"fontSize": "12px", "color": "var(--amber)" if results else "var(--muted)", "fontWeight": "600"},
+            ),
+        ]),
+        html.P("Cada competencia terminada queda guardada aquí para siempre.", className="text-muted",
+               style={"marginBottom": "12px"}),
+        html.Div(className="trophy-shelf", children=[c for c in cards if c is not None]),
+    ])
+
+
+def _team_wellness_chart(coach_id: int):
+    """Gráfica multi-línea: bienestar de cada atleta en los últimos 7 días."""
+    try:
+        series = db.get_team_wellness_7d(int(coach_id)) or []
+    except Exception:
+        series = []
+
+    if not series:
+        return html.Div(className="card", style={"marginTop": "16px"}, children=[
+            html.H4("Bienestar del equipo — 7 días", className="card-title"),
+            html.P("Sin lecturas en los últimos 7 días.", className="text-muted"),
+        ])
+
+    _COLORS = ["#2fb7c4", "#f0a832", "#e45a5a", "#27c98f", "#a78bfa", "#f472b6", "#fb923c"]
+    fig = go.Figure()
+    for i, athlete in enumerate(series):
+        color = _COLORS[i % len(_COLORS)]
+        fig.add_trace(go.Scatter(
+            x=athlete["dates"],
+            y=athlete["scores"],
+            mode="lines+markers",
+            name=str(athlete["name"]),
+            line=dict(color=color, width=2),
+            marker=dict(size=7, color=color),
+            connectgaps=True,
+            hovertemplate=f"<b>{athlete['name']}</b><br>%{{x}}<br>%{{y:.0f}}/100<extra></extra>",
+        ))
+
+    fig.add_hline(y=65, line_dash="dot",
+                  line_color="rgba(240,168,50,.35)", line_width=1)
+
+    _uc.apply_chart_style(fig, title="Bienestar del equipo — últimos 7 días", height=260)
+    try:
+        fig.update_layout(
+            margin=dict(l=44, r=16, t=44, b=50),
+            yaxis=dict(range=[0, 105], showgrid=True,
+                       gridcolor="rgba(255,255,255,0.07)", zeroline=False),
+            xaxis=dict(showgrid=False),
+            legend=dict(
+                orientation="h", x=0, y=-0.22,
+                font=dict(size=11, color="#8fa3bf"),
+                bgcolor="rgba(0,0,0,0)",
+            ),
+        )
+    except Exception:
+        pass
+
+    return html.Div(className="card", style={"marginTop": "16px"}, children=[
+        dcc.Graph(figure=fig, config=_uc.graph_config(), style={"width": "100%"}),
+    ])
+
+
+def _temporal_compare_card(uid_int: int):
+    """Card 'yo esta semana vs hace 30 días': bienestar promedio y constancia de check-ins."""
+    import statistics
+    from datetime import date as _date, timedelta as _td
+
+    try:
+        qrows = db.list_questionnaires(uid_int) or []
+    except Exception:
+        qrows = []
+
+    if not qrows:
+        return html.Div()
+
+    today = _date.today()
+    d7_start = (today - _td(days=6)).isoformat()
+    d30_start = (today - _td(days=36)).isoformat()
+    d30_end = (today - _td(days=7)).isoformat()
+
+    scores_7d, scores_30d = [], []
+    for q in qrows:
+        ts = (q.get("ts") or "")[:10]
+        s = q.get("wellness_score")
+        if s is None:
+            continue
+        s = float(s)
+        if ts >= d7_start:
+            scores_7d.append(s)
+        elif d30_start <= ts <= d30_end:
+            scores_30d.append(s)
+
+    if not scores_7d:
+        return html.Div()
+
+    avg_7d = statistics.mean(scores_7d)
+    avg_30d = statistics.mean(scores_30d) if scores_30d else None
+
+    def _block(label, val_str, diff_str, cls):
+        return html.Div(className="tc-block", children=[
+            html.Div(label, className="tc-block__label"),
+            html.Div(val_str, className=f"tc-block__value {cls}"),
+            html.Div(diff_str, className="tc-block__sub"),
+        ])
+
+    def _wellness_block():
+        val_str = f"{avg_7d:.0f}/100"
+        if avg_30d is None:
+            return _block("Bienestar prom.", val_str, "Sin comparativa previa", "tc-same")
+        diff = avg_7d - avg_30d
+        cls = "tc-up" if diff > 3 else ("tc-down" if diff < -3 else "tc-same")
+        sign = "+" if diff > 0 else ""
+        return _block("Bienestar prom.", val_str, f"{sign}{diff:.0f} vs mes anterior", cls)
+
+    def _checkin_block():
+        n = len(scores_7d)
+        n30 = len(scores_30d) if scores_30d else None
+        if n30 is None:
+            return _block("Check-ins (7d)", str(n), "Sin comparativa previa", "tc-same")
+        diff = n - n30
+        cls = "tc-up" if diff > 0 else ("tc-down" if diff < 0 else "tc-same")
+        sign = "+" if diff > 0 else ""
+        return _block("Check-ins (7d)", str(n), f"{sign}{diff} vs mes anterior", cls)
+
+    return html.Div(className="card", style={"marginTop": "14px"}, children=[
+        html.H4("Mi evolución — esta semana vs mes anterior", className="card-title"),
+        html.P("Compara tu bienestar y constancia ahora respecto a hace 30 días.",
+               className="text-muted", style={"marginBottom": "12px"}),
+        html.Div(className="temporal-compare", children=[
+            _wellness_block(),
+            _checkin_block(),
+        ]),
+    ])
+
+
+def _competition_badge(profile):
+    proximity = _profile_label(profile.get("competition_proximity"), "Sin competencia cercana")
+    level = _profile_label(profile.get("competitive_level"), "Sin definir")
+    status = _profile_label(profile.get("current_status"), "Sin definir")
+    watch = _profile_label(profile.get("watch_zone"), "Sin zona marcada")
+    return html.Div(className="card", children=[
+        html.H4("Contexto competitivo", className="card-title"),
+        html.Ul([
+            html.Li([html.Strong("Competencia: "), proximity]),
+            html.Li([html.Strong("Nivel: "), level]),
+            html.Li([html.Strong("Plan actual: "), status]),
+            html.Li([html.Strong("Zona a vigilar: "), watch]),
+        ], className="list-compact"),
+    ])
 
 
 def _weekly_card_athlete(summary):
@@ -487,7 +843,8 @@ def _parse_ts(ts):
     return None
 
 
-def _coach_daily_snapshot(team_summary):
+def _coach_daily_snapshot(team_summary, profiles_bulk=None, qs_bulk=None):
+    """Calcula snapshot diario del equipo usando datos pre-cargados (bulk) para evitar N+1."""
     from datetime import datetime
 
     snapshot = {
@@ -504,6 +861,8 @@ def _coach_daily_snapshot(team_summary):
     }
     review_ids = set()
     now = datetime.utcnow()
+    profiles_bulk = profiles_bulk or {}
+    qs_bulk = qs_bulk or {}
 
     for athlete in (team_summary or []):
         athlete_id = athlete.get("id")
@@ -518,26 +877,14 @@ def _coach_daily_snapshot(team_summary):
         elif flag == "yellow":
             snapshot["priority_yellow"] += 1
 
-        try:
-            athlete_profile = (
-                db.get_athlete_profile(int(athlete_id))
-                if athlete_id and hasattr(db, "get_athlete_profile")
-                else _profile_defaults()
-            )
-        except Exception:
-            athlete_profile = _profile_defaults()
-
+        athlete_profile = profiles_bulk.get(athlete_id) or _profile_defaults()
         competition = (athlete_profile.get("competition_proximity") or "").strip()
         if competition == "Semana competitiva":
             snapshot["competition_week"] += 1
             snapshot["competition_names"].append(athlete_name)
             review_ids.add(athlete_id or athlete_name)
 
-        try:
-            qrows = db.list_questionnaires(int(athlete_id)) if athlete_id else []
-        except Exception:
-            qrows = []
-
+        qrows = qs_bulk.get(athlete_id) or []
         latest_q = qrows[0] if qrows else None
         latest_dt = _parse_ts((latest_q or {}).get("ts"))
         latest_score = (latest_q or {}).get("wellness_score")
@@ -660,9 +1007,16 @@ def _coach_profile_fold(title: str, hint: str, body_children, open_by_default: b
     )
 
 
-def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id):
+def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id,
+                             profiles_bulk=None, qs_bulk=None):
     athlete_count = len(team_summary or [])
-    coach_snapshot = _coach_daily_snapshot(team_summary)
+    coach_snapshot = _coach_daily_snapshot(team_summary, profiles_bulk=profiles_bulk, qs_bulk=qs_bulk)
+
+    _notif_prefs = {}
+    try:
+        _notif_prefs = db.get_notification_prefs(int(coach_id)) if coach_id else {}
+    except Exception:
+        pass
 
     try:
         teams = db.list_teams(int(coach_id)) or []
@@ -765,26 +1119,73 @@ def _coach_profile_layout_v3(name, sport, created_pretty, team_summary, coach_id
                             html.Li("Entra a Panel de equipo cuando quieras una lectura global del grupo."),
                             html.Li("Usa Mi jornada para ordenar el día y decidir por dónde empezar."),
                             html.Li("Abre Estado del equipo si necesitas bajar ya al detalle por atleta."),
-                            html.Li("Pasa a Análisis solo cuando haga falta confirmar señales y respuesta al esfuerzo."),
+                            html.Li("Pasa a Señales ECG / IMU solo cuando haga falta confirmar respuesta al esfuerzo."),
                         ], className="list-compact"),
                     ],
                     open_by_default=False,
                 ),
-                html.Div(className="card profile-links-card", children=[
-                    html.H4("Accesos útiles", className="card-title"),
-                    html.P(
-                        "Desde aquí entras directo a lo que más vas a consultar durante el día.",
-                        className="text-muted",
-                    ),
-                    html.Div(className="row-wrap-10 session-action-row", children=[
-                        _quick_link("Abrir panel de equipo", "/", primary=True),
-                        _quick_link("Ir a mi jornada", "/sesion"),
-                        _quick_link("Ver estado del equipo", "/usuarios"),
-                        _quick_link("Ir a análisis", "/ecg"),
+                html.Details(className="card collapsible-card", open=False, style={"marginBottom": "14px"}, children=[
+                    html.Summary(className="collapsible-card__summary", children=[
+                        html.Div(className="collapsible-card__head", children=[
+                            html.Span("Notificaciones por email", className="card-title"),
+                            html.Span("Alertas sobre tu equipo", className="text-muted"),
+                        ]),
+                        html.Span("⌄", className="collapsible-card__chevron"),
+                    ]),
+                    html.Div(className="collapsible-card__body", children=[
+                        html.P(
+                            "Configura qué alertas quieres recibir sobre tu equipo.",
+                            className="text-muted",
+                            style={"marginBottom": "14px"},
+                        ),
+                        dcc.Checklist(
+                            id="notif-coach-wellness",
+                            options=[{"label": " Recibir alerta cuando un atleta registre bienestar < 50", "value": "on"}],
+                            value=["on"] if _notif_prefs.get("low_wellness_alert", 1) else [],
+                            style={"marginBottom": "8px", "fontSize": "14px"},
+                        ),
+                        dcc.Checklist(
+                            id="notif-coach-weekly",
+                            options=[{"label": " Recordarme enviar el resumen semanal del equipo", "value": "on"}],
+                            value=["on"] if _notif_prefs.get("checkin_reminder", 0) else [],
+                            style={"marginBottom": "14px", "fontSize": "14px"},
+                        ),
+                        html.Div(className="btn-save-row", children=[
+                            html.Button(
+                                "Guardar preferencias",
+                                id="notif-coach-save-btn",
+                                className="btn btn-ghost btn-xs",
+                                n_clicks=0,
+                            ),
+                            html.Div(id="notif-coach-save-msg", className="text-muted text-xs"),
+                        ]),
+                    ]),
+                ]),
+                html.Details(className="card collapsible-card profile-links-card", open=False, children=[
+                    html.Summary(className="collapsible-card__summary", children=[
+                        html.Div(className="collapsible-card__head", children=[
+                            html.Span("Accesos útiles", className="card-title"),
+                            html.Span("Entradas rápidas al día a día", className="text-muted"),
+                        ]),
+                        html.Span("⌄", className="collapsible-card__chevron"),
+                    ]),
+                    html.Div(className="collapsible-card__body", children=[
+                        html.P(
+                            "Desde aquí entras directo a lo que más vas a consultar durante el día.",
+                            className="text-muted",
+                            style={"marginBottom": "12px"},
+                        ),
+                        html.Div(className="row-wrap-10 session-action-row", children=[
+                            _quick_link("Abrir panel de equipo", "/", primary=True),
+                            _quick_link("Ir a mi jornada", "/sesion"),
+                            _quick_link("Ver estado del equipo", "/usuarios"),
+                            _quick_link("Señales ECG / IMU", "/ecg"),
+                        ]),
                     ]),
                 ]),
             ]),
         ]),
+        _team_wellness_chart(coach_id),
     ], className="page-content profile-shell coach-shell")
 
 
@@ -804,7 +1205,7 @@ def layout():
                 ]),
                 html.Div(className="kpi", children=[
                     html.Div("Accesos", className="kpi-label"),
-                    html.Div("Inicio • Sesiones • Análisis • Wellbeing", className="kpi-value", style={"fontSize": "16px"}),
+                    html.Div("Inicio • Sesión • Señales • Wellbeing", className="kpi-value", style={"fontSize": "16px"}),
                     html.Div(className="kpi-ecg-line")
                 ]),
             ])
@@ -877,38 +1278,84 @@ def layout():
     weekly_summary = {}
     team_summary = []
     load_history = []
+    profiles_bulk = {}
+    qs_bulk = {}
     try:
         if role == "deportista" and uid_int:
             weekly_summary = db.get_weekly_load_summary(uid_int) if hasattr(db, "get_weekly_load_summary") else {}
             load_history = db.get_load_history(uid_int) if hasattr(db, "get_load_history") else []
         elif role == "coach" and uid_int:
             team_summary = db.get_team_weekly_summary(uid_int) if hasattr(db, "get_team_weekly_summary") else []
+            _bulk_ids = [a["id"] for a in team_summary if a.get("id")]
+            if _bulk_ids:
+                profiles_bulk = db.get_athlete_profiles_bulk(_bulk_ids)
+                qs_bulk = db.list_questionnaires_bulk(_bulk_ids)
     except Exception:
         pass
+
+    # Notification prefs (needed for both athlete and coach panels)
+    _notif_prefs = {}
+    try:
+        _notif_prefs = db.get_notification_prefs(uid_int) if uid_int else {}
+    except Exception:
+        _notif_prefs = {}
+
+    # Readiness score
+    _rds = None
+    if role == "deportista" and uid_int:
+        try:
+            _rds = db.get_readiness_score(uid_int)
+        except Exception:
+            pass
+
+    # Streak calculation
+    _streak_cur = 0
+    _streak_best = 0
+    if role == "deportista" and uid_int:
+        try:
+            from pages.home import _calc_streak as _cs
+            _s = _cs(uid_int)
+            _streak_cur, _streak_best = _s["current"], _s["best"]
+        except Exception:
+            pass
 
     if role == "deportista":
         readiness_value = _safe_str(f"{last_wellness_val:.0f} / 100" if last_wellness_val is not None else "Sin datos")
         profile_note = _profile_label(athlete_profile.get("profile_note"), "Sin nota de contexto todavía.")
+        _sport_key = _norm_sport(sport)
+        _avatar_url = user.get("avatar_url") if user else None
 
         return html.Div([
             html.Div(className="profile-hero-grid", children=[
                 html.Div(className="page-head profile-hero", children=[
-                    html.Div(className="session-pill-row", children=[
-                        html.Span(sport, className="session-pill"),
-                        html.Span(_profile_label(athlete_profile.get("competitive_level"), "Perfil base"), className="session-pill session-pill--muted"),
+                    html.Div(style={"display": "flex", "alignItems": "flex-start", "gap": "18px"}, children=[
+                        _avatar_block(name, _avatar_url),
+                        html.Div(children=[
+                            html.Div(className="session-pill-row", children=[
+                                html.Span(sport, className="session-pill"),
+                                html.Span(_profile_label(athlete_profile.get("competitive_level"), "Perfil base"), className="session-pill session-pill--muted"),
+                            ]),
+                            html.H2("Mi perfil", style={"marginTop": "6px"}),
+                            html.P(
+                                (
+                                    "Ve cómo llegas hoy de piernas, qué zonas vigilar y qué contexto define tu sesión."
+                                    if _sport_key == "taekwondo" else
+                                    "Ve cómo llegas hoy de manos y guardia, qué zonas vigilar y qué contexto define tu sesión."
+                                    if _sport_key == "boxeo" else
+                                    "Aquí puedes ver cómo llegas hoy, qué partes de tu perfil influyen en la lectura y editar solo cuando haga falta."
+                                ),
+                                className="text-muted",
+                            ),
+                        ]),
                     ]),
-                    html.H2("Mi perfil"),
-                    html.P(
-                        "Aquí puedes ver cómo llegas hoy, qué partes de tu perfil influyen en la lectura y editar solo cuando haga falta.",
-                        className="text-muted",
-                    ),
+                    html.Div(id="avatar-msg", className="text-muted", style={"fontSize": "12px", "marginTop": "4px"}),
                 ]),
                 html.Div(className="card profile-focus-card", children=[
                     html.H4("Lo que más influye hoy", className="card-title"),
                     html.P("Este contexto ayuda a que tu sesión, análisis y wellbeing hablen el mismo idioma.", className="text-muted"),
                     html.Ul([
                         html.Li([html.Strong("Estado del día: "), readiness_value]),
-                        html.Li([html.Strong("Estado actual: "), _profile_label(athlete_profile.get("current_status"), "Sin definir")]),
+                        html.Li([html.Strong("Plan actual: "), _profile_label(athlete_profile.get("current_status"), "Sin definir")]),
                         html.Li([html.Strong("Zona a vigilar: "), _profile_label(athlete_profile.get("watch_zone"), "Sin zona marcada")]),
                         html.Li([html.Strong("Competencia: "), _profile_label(athlete_profile.get("competition_proximity"), "Sin competencia cercana")]),
                     ], className="list-compact"),
@@ -916,16 +1363,33 @@ def layout():
             ]),
             html.Div(className="kpis profile-kpis", children=[
                 html.Div(className="kpi", children=[
-                    html.Div("Perfil deportivo", className="kpi-label"),
-                    html.Div(name, className="kpi-value"),
-                    html.Div(f"Deporte: {sport}", className="kpi-sub"),
-                    html.Div(f"Desde: {created_pretty}", className="kpi-sub"),
-                    html.Div(className="kpi-ecg-line")
+                    html.Div("Forma de competición", className="kpi-label"),
+                    html.Div(
+                        str(_rds["score"]) if _rds else "—",
+                        className="kpi-value",
+                        style={"color": _rds["color"]} if _rds else {},
+                    ),
+                    html.Div(
+                        _rds["label"] if _rds else "Sin datos suficientes",
+                        className="kpi-sub",
+                    ),
+                    html.Div(className="kpi-ecg-line"),
                 ]),
                 html.Div(className="kpi", children=[
                     html.Div("Estado del día", className="kpi-label"),
                     html.Div(readiness_value, className="kpi-value"),
                     html.Div(last_wellness, className="kpi-sub"),
+                    html.Div(className="kpi-ecg-line")
+                ]),
+                html.Div(className="kpi", children=[
+                    html.Div("Racha actual 🔥", className="kpi-label"),
+                    html.Div(
+                        f"{_streak_cur} días",
+                        className="kpi-value",
+                        style={"color": "var(--neon)" if _streak_cur >= 7 else
+                                        "var(--amber)" if _streak_cur >= 3 else "var(--ink)"},
+                    ),
+                    html.Div(f"Mejor: {_streak_best} días", className="kpi-sub"),
                     html.Div(className="kpi-ecg-line")
                 ]),
                 html.Div(className="kpi", children=[
@@ -941,34 +1405,48 @@ def layout():
                     _weekly_card_athlete(weekly_summary),
                     _recommendations_card(_build_recommendations(sport, last_wellness_val, weekly_summary, athlete_profile, latest_answers)),
                     _load_chart_card(load_history),
+                    _temporal_compare_card(uid_int),
                     html.Div(className="profile-share-row", children=[
                         html.Button(
                             "Compartir esta semana",
                             id="btn-share-week",
-                            className="btn btn-ghost",
-                            style={"fontSize": "13px", "padding": "6px 16px"},
+                            className="btn btn-ghost btn-xs",
+                        ),
+                        html.A(
+                            "Descargar informe PDF",
+                            href=f"/informe/{uid}",
+                            className="btn btn-primary btn-xs",
+                            target="_blank",
                         ),
                         dcc.Download(id="download-share-card"),
                     ]),
                 ]),
                 html.Div(className="profile-stack", children=[
-                    html.Div(
-                        className="inner-card profile-context-card",
-                        style={"borderRadius": "14px", "padding": "16px"},
+                    html.Details(
+                        className="card collapsible-card",
+                        open=True,
                         children=[
-                            html.H4("Tu contexto deportivo", className="card-title"),
-                            html.P("Estos datos ayudan a que la lectura del día y las recomendaciones se parezcan más a tu realidad.", className="text-muted"),
-                            html.Div(className="profile-context-grid", children=[
-                                _profile_grid_item("Nivel competitivo", athlete_profile.get("competitive_level")),
-                                _profile_grid_item("Categoría / peso", athlete_profile.get("weight_category")),
-                                _profile_grid_item("Lado dominante", athlete_profile.get("dominant_side")),
-                                _profile_grid_item("Estado actual", athlete_profile.get("current_status")),
-                                _profile_grid_item("Zona a vigilar", athlete_profile.get("watch_zone")),
-                                _profile_grid_item("Cercanía a competencia", athlete_profile.get("competition_proximity")),
+                            html.Summary(className="collapsible-card__summary", children=[
+                                html.Div(className="collapsible-card__head", children=[
+                                    html.Span("Tu contexto deportivo", className="card-title"),
+                                    html.Span("Nivel · categoría · zona · plan", className="text-muted"),
+                                ]),
+                                html.Span("⌄", className="collapsible-card__chevron"),
                             ]),
-                            html.Div(className="profile-note", children=[
-                                html.Strong("Nota de contexto: "),
-                                html.Span(profile_note),
+                            html.Div(className="collapsible-card__body", children=[
+                                html.P("Estos datos ayudan a que la lectura del día y las recomendaciones se parezcan más a tu realidad.", className="text-muted", style={"marginBottom": "12px"}),
+                                html.Div(className="profile-context-grid", children=[
+                                    _profile_grid_item("Nivel competitivo", athlete_profile.get("competitive_level")),
+                                    _profile_grid_item("Categoría / peso", athlete_profile.get("weight_category")),
+                                    _profile_grid_item("Lado dominante", athlete_profile.get("dominant_side")),
+                                    _profile_grid_item("Plan actual", athlete_profile.get("current_status")),
+                                    _profile_grid_item("Zona a vigilar", athlete_profile.get("watch_zone")),
+                                    _profile_grid_item("Cercanía a competencia", athlete_profile.get("competition_proximity")),
+                                ]),
+                                html.Div(className="profile-note", style={"marginTop": "10px"}, children=[
+                                    html.Strong("Nota de contexto: "),
+                                    html.Span(profile_note),
+                                ]),
                             ]),
                         ],
                     ),
@@ -1011,12 +1489,13 @@ def layout():
                                                      ]),
                                     ]),
                                     html.Div(className="filter-item", children=[
-                                        html.Label("Estado actual"),
+                                        html.Label("Plan actual"),
                                         dcc.Dropdown(id="dash-current-status", value=athlete_profile.get("current_status"), clearable=False,
                                                      options=[
                                                          {"label": "Listo para apretar", "value": "Listo para apretar"},
                                                          {"label": "Listo con control", "value": "Listo con control"},
                                                          {"label": "Día para ajustar carga", "value": "Día para ajustar carga"},
+                                                         {"label": "Recuperación activa", "value": "Recuperación activa"},
                                                          {"label": "En vigilancia", "value": "En vigilancia"},
                                                      ]),
                                     ]),
@@ -1046,24 +1525,137 @@ def layout():
                             ]),
                         ],
                     ),
-                    html.Div(className="card profile-links-card", children=[
-                        html.H4("Accesos útiles", className="card-title"),
-                        html.P("Cuando quieras seguir, aquí tienes las entradas que más sentido suelen tener después del perfil.", className="text-muted"),
-                        html.Div(className="row-wrap-10 session-action-row", children=[
-                            _quick_link("Ver sesiones", "/sesion", primary=True),
-                            _quick_link("Ir a análisis", "/ecg"),
-                            _quick_link("Responder wellbeing", "/cuestionario"),
+                    html.Details(className="card collapsible-card", open=False, style={"marginBottom": "14px"}, children=[
+                        html.Summary(className="collapsible-card__summary", children=[
+                            html.Div(className="collapsible-card__head", children=[
+                                html.Span("Notificaciones por email", className="card-title"),
+                                html.Span("Alertas y recordatorios", className="text-muted"),
+                            ]),
+                            html.Span("⌄", className="collapsible-card__chevron"),
+                        ]),
+                        html.Div(className="collapsible-card__body", children=[
+                            html.P("Elige qué alertas quieres recibir en tu correo.", className="text-muted",
+                                   style={"marginBottom": "14px"}),
+                            dcc.Checklist(
+                                id="notif-low-wellness",
+                                options=[{"label": " Alertar a mi coach si mi bienestar es < 50", "value": "on"}],
+                                value=["on"] if _notif_prefs.get("low_wellness_alert", 1) else [],
+                                style={"marginBottom": "8px", "fontSize": "14px"},
+                            ),
+                            dcc.Checklist(
+                                id="notif-announcements",
+                                options=[{"label": " Recibir comunicados del coach por email", "value": "on"}],
+                                value=["on"] if _notif_prefs.get("announcement_notify", 1) else [],
+                                style={"marginBottom": "8px", "fontSize": "14px"},
+                            ),
+                            dcc.Checklist(
+                                id="notif-checkin-reminder",
+                                options=[{"label": " Recibir recordatorio de check-in si no lo he hecho", "value": "on"}],
+                                value=["on"] if _notif_prefs.get("checkin_reminder", 0) else [],
+                                style={"marginBottom": "14px", "fontSize": "14px"},
+                            ),
+                            html.Div(className="btn-save-row", children=[
+                                html.Button("Guardar preferencias", id="notif-save-btn",
+                                            className="btn btn-ghost btn-xs", n_clicks=0),
+                                html.Div(id="notif-save-msg", className="text-muted text-xs"),
+                            ]),
+                            html.Hr(style={"margin": "16px 0", "borderColor": "var(--line)"}),
+                            html.P("Recibe ahora un email con tu racha, bienestar promedio y carga de los últimos 7 días.",
+                                   className="text-muted", style={"fontSize": "13px", "marginBottom": "10px"}),
+                            html.Div(style={"display": "flex", "gap": "10px", "alignItems": "center", "flexWrap": "wrap"}, children=[
+                                html.Button("Recibir mi resumen semanal", id="btn-athlete-weekly-digest",
+                                            className="btn btn-ghost btn-xs", n_clicks=0),
+                                html.Div(id="athlete-digest-msg", className="text-muted text-xs"),
+                            ]),
+                        ]),
+                    ]),
+                    html.Details(className="card collapsible-card profile-links-card", open=False, children=[
+                        html.Summary(className="collapsible-card__summary", children=[
+                            html.Div(className="collapsible-card__head", children=[
+                                html.Span("Accesos útiles", className="card-title"),
+                                html.Span("Entradas rápidas", className="text-muted"),
+                            ]),
+                            html.Span("⌄", className="collapsible-card__chevron"),
+                        ]),
+                        html.Div(className="collapsible-card__body", children=[
+                            html.P("Cuando quieras seguir, aquí tienes las entradas que más sentido suelen tener después del perfil.", className="text-muted", style={"marginBottom": "12px"}),
+                            html.Div(className="row-wrap-10 session-action-row", children=[
+                                _quick_link("Abrir mi sesión", "/sesion", primary=True),
+                                _quick_link("Señales ECG / IMU", "/ecg"),
+                                _quick_link("Responder check-in", "/cuestionario"),
+                            ]),
                         ]),
                     ]),
                 ]),
             ]),
+            _trophy_shelf(uid_int),
         ], className="page-content profile-shell")
 
     if role == "coach":
-        return _coach_profile_layout_v3(name, sport, created_pretty, team_summary, uid_int)
+        return _coach_profile_layout_v3(name, sport, created_pretty, team_summary, uid_int,
+                                        profiles_bulk=profiles_bulk, qs_bulk=qs_bulk)
 
     return html.Div([
-        html.H2("Panel"),
-        html.P("Rol no reconocido. Vuelve a iniciar sesión.", className="text-muted"),
+        html.Div(className="page-head", children=[
+            html.H2("Panel de administración"),
+            html.P("Accede a métricas de plataforma, gestión de usuarios y seguimiento del equipo.", className="text-muted"),
+        ]),
+        html.Div(className="filters-bar filters-bar--3", style={"marginTop": "20px"}, children=[
+            dcc.Link(html.Button("Métricas de uso", className="btn btn-primary"), href="/metricas"),
+            dcc.Link(html.Button("Gestión de usuarios", className="btn btn-ghost"), href="/usuarios"),
+            dcc.Link(html.Button("Análisis de rendimiento", className="btn btn-ghost"), href="/analisis"),
+        ]),
     ], className="page-content")
+
+
+# ── Callback: subida de foto de perfil ──────────────────────────────────────
+@callback(
+    Output("avatar-display", "children"),
+    Output("avatar-msg",     "children"),
+    Input("avatar-upload",   "contents"),
+    State("avatar-upload",   "filename"),
+    prevent_initial_call=True,
+)
+def upload_avatar(contents, filename):
+    from dash.exceptions import PreventUpdate
+    if not contents:
+        raise PreventUpdate
+
+    uid = session.get("user_id")
+    if not uid:
+        raise PreventUpdate
+
+    if isinstance(contents, str) and len(contents) > 8_000_000:
+        return html.Div("?", className="avatar-initials"), "Imagen demasiado grande. Usa una foto menor a 6 MB."
+
+    # Validar formato
+    allowed = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+    if filename and not any(filename.lower().endswith(e) for e in allowed):
+        return html.Div("?", className="avatar-initials"), "Formato no admitido. Usa JPG, PNG o WEBP."
+
+    # Intentar redimensionar con PIL; si no disponible, usar data URL directamente
+    data_url = contents
+    try:
+        import base64, io as _io
+        _header, encoded = contents.split(",", 1)
+        img_bytes = base64.b64decode(encoded)
+        from PIL import Image
+        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        img.thumbnail((256, 256), Image.LANCZOS)
+        out = _io.BytesIO()
+        img.save(out, format="JPEG", quality=82)
+        b64 = base64.b64encode(out.getvalue()).decode()
+        data_url = f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        pass
+
+    if len(data_url) > 700_000:
+        return html.Div("?", className="avatar-initials"), "Imagen demasiado grande. Max ~500 KB."
+
+    try:
+        db.save_avatar_url(int(uid), data_url)
+    except Exception:
+        return html.Div("?", className="avatar-initials"), "Error al guardar la foto."
+
+    return html.Img(src=data_url, className="avatar-circle"), "Foto actualizada."
 
