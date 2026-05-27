@@ -1799,6 +1799,7 @@ class SignalsView:
             dcc.Store(id="pose-results",         data=None, storage_type="session"),
             dcc.Store(id="pose-mediapipe-store", data=None),
             dcc.Store(id="pose-speed-store",     data=None),
+            dcc.Store(id="pose-ai-note-store",   data=None),  # Step 4: AI duel insight async
             # stores and helpers for video replay (always in DOM)
             dcc.Store(id="replay-video-store",   data=None),
             dcc.Store(id="replay-upload-result", data=None),
@@ -6309,12 +6310,14 @@ class SignalsView:
                 ]),
             )
 
-        # Callback 3/3 — IA + renderizado
+        # Callback 3/3 — renderizado (sin bloqueo de IA)
+        # La nota de IA del duelo se genera en step4 para no bloquear la UI.
         @app.callback(
-            Output("pose-output",   "children", allow_duplicate=True),
-            Output("pose-results",  "data"),
-            Output("ecg-main-tabs", "value",    allow_duplicate=True),
-            Output("pose-progress", "children", allow_duplicate=True),
+            Output("pose-output",        "children", allow_duplicate=True),
+            Output("pose-results",       "data"),
+            Output("ecg-main-tabs",      "value",    allow_duplicate=True),
+            Output("pose-progress",      "children", allow_duplicate=True),
+            Output("pose-ai-note-store", "data"),
             Input("pose-speed-store", "data"),
             prevent_initial_call=True,
         )
@@ -6748,46 +6751,23 @@ class SignalsView:
                         legend,
                     ]
 
-                # ── AI duel insight ──────────────────────────────────────────
-                ai_section = []
-                try:
-                    import ai_insights as _AI_duel
-                    duel_payload = result.get("duel") or {}
-                    sport_for_ai = (result.get("biomech") or {}).get("sport") or "taekwondo"
-                    ai_note = _AI_duel.generate_duel_insight(
-                        duel_payload,
-                        sport=sport_for_ai,
-                        audience=_viewer_role,
-                        athlete_name=athlete_name,
-                        coach_name=_viewer_name,
-                    )
-                    if ai_note:
-                        ai_section = [
-                            html.Div(className="ecg-divider ecg-divider--spaced"),
-                            html.Div(
-                                [
-                                    html.P(
-                                        "Lectura del combate (IA)",
-                                        style={"fontWeight": "700", "fontSize": "13px",
-                                               "color": "var(--accent)", "marginBottom": "8px"},
-                                    ),
-                                    dcc.Markdown(
-                                        ai_note,
-                                        style={"fontSize": "13px", "lineHeight": "1.65",
-                                               "color": "var(--text)"},
-                                    ),
-                                    _evidence_list(duel_evidence),
-                                ],
-                                style={
-                                    "background": "var(--card-bg)",
-                                    "border": "1px solid var(--line)",
-                                    "borderRadius": "10px",
-                                    "padding": "14px 16px",
-                                },
-                            ),
-                        ]
-                except Exception:
-                    pass
+                # ── AI duel insight — placeholder; llenado async por step4 ────
+                # (extraído de step3 para evitar bloquear la UI ~20 s)
+                _ai_note_placeholder = html.Div(
+                    id="pose-ai-note-container",
+                    children=[html.P(
+                        "Generando lectura IA del combate…",
+                        className="text-muted",
+                        style={"fontSize": "12px", "marginTop": "6px"},
+                    )],
+                )
+                _ai_store_payload = {
+                    "job_id":       job_id,
+                    "viewer_role":  _viewer_role,
+                    "viewer_name":  _viewer_name,
+                    "athlete_name": athlete_name,
+                    "session_sport": _session_sport,
+                }
 
                 # ── Simulated ECG / IMU from movement analysis ───────────────
                 sim_section = []
@@ -6936,13 +6916,13 @@ class SignalsView:
                     *rounds_section,
                     *sim_section,
                     *skeleton_section,
-                    *ai_section,
+                    _ai_note_placeholder,
                     meta,
                 ])
                 speed_store_data["rendered_output"] = rendered_output
                 speed_store_data["rendered_progress"] = ""
                 _pose_cache_put(speed_store_data, job_id=job_id)
-                return rendered_output, _slim_pose_report(report_data, job_id), "tab-biomech", ""
+                return rendered_output, _slim_pose_report(report_data, job_id), "tab-biomech", "", _ai_store_payload
 
             sport_name = {
                 "taekwondo": "Taekwondo",
@@ -7255,7 +7235,72 @@ class SignalsView:
             speed_store_data["rendered_output"] = rendered_output
             speed_store_data["rendered_progress"] = ""
             _pose_cache_put(speed_store_data, job_id=job_id)
-            return rendered_output, _slim_pose_report(report_data, job_id), "tab-biomech", ""
+            # Análisis individual: no hay nota de IA de duelo → pose-ai-note-store a None
+            return rendered_output, _slim_pose_report(report_data, job_id), "tab-biomech", "", None
+
+        # Callback 4/4 — AI duel insight (async, no bloquea UI)
+        @app.callback(
+            Output("pose-ai-note-container", "children"),
+            Input("pose-ai-note-store",      "data"),
+            prevent_initial_call=True,
+        )
+        def _pose_step4_ai_duel(store):
+            job_id = (store or {}).get("job_id")
+            if not job_id:
+                raise PreventUpdate
+            cached = _pose_cache_get(job_id)
+            if not cached or not cached.get("result"):
+                raise PreventUpdate
+            result = cached["result"]
+            if not result.get("duel"):
+                raise PreventUpdate
+            _viewer_role  = (store or {}).get("viewer_role",  "deportista")
+            _viewer_name  = (store or {}).get("viewer_name",  "")
+            athlete_name  = (store or {}).get("athlete_name", "Deportista")
+            _session_sport = (store or {}).get("session_sport", "")
+            duel_frames   = (result.get("duel") or {}).get("frames") or []
+            fps_val       = result.get("fps", 0)
+            pressure_lbl  = ((result.get("duel") or {}).get("metrics") or {}).get("pressure_label", "")
+            duel_evidence = _duel_frame_evidence(duel_frames, fps_val, pressure_lbl)
+            try:
+                import ai_insights as _AI_duel
+                duel_payload = result.get("duel") or {}
+                sport_for_ai = (result.get("biomech") or {}).get("sport") or "taekwondo"
+                ai_note = _AI_duel.generate_duel_insight(
+                    duel_payload,
+                    sport=sport_for_ai,
+                    audience=_viewer_role,
+                    athlete_name=athlete_name,
+                    coach_name=_viewer_name,
+                )
+                if ai_note:
+                    return [
+                        html.Div(className="ecg-divider ecg-divider--spaced"),
+                        html.Div(
+                            [
+                                html.P(
+                                    "Lectura del combate (IA)",
+                                    style={"fontWeight": "700", "fontSize": "13px",
+                                           "color": "var(--accent)", "marginBottom": "8px"},
+                                ),
+                                dcc.Markdown(
+                                    ai_note,
+                                    style={"fontSize": "13px", "lineHeight": "1.65",
+                                           "color": "var(--text)"},
+                                ),
+                                _evidence_list(duel_evidence),
+                            ],
+                            style={
+                                "background": "var(--card-bg)",
+                                "border": "1px solid var(--line)",
+                                "borderRadius": "10px",
+                                "padding": "14px 16px",
+                            },
+                        ),
+                    ]
+            except Exception:
+                pass
+            return []
 
         @app.callback(
             Output("pose-output",   "children", allow_duplicate=True),
@@ -7325,6 +7370,7 @@ class SignalsView:
             Output("pose-results",         "data",     allow_duplicate=True),
             Output("pose-mediapipe-store", "data",     allow_duplicate=True),
             Output("pose-speed-store",     "data",     allow_duplicate=True),
+            Output("pose-ai-note-store",   "data",     allow_duplicate=True),
             Output("pose-output",          "children", allow_duplicate=True),
             Output("pose-progress",        "children", allow_duplicate=True),
             Output("pose-report-msg",      "children", allow_duplicate=True),
@@ -7349,6 +7395,7 @@ class SignalsView:
                 None,
                 None,
                 None,
+                None,  # pose-ai-note-store
                 html.P(
                     f"Cambiaste el objetivo a {label}. Presiona 'Analizar postura' para generar una nueva lectura.",
                     className="text-muted",
