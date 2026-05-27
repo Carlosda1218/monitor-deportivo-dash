@@ -1543,7 +1543,7 @@ columns=[
                     _kpi_cards += [{"label": "Golpes/min", "value": f"{imu_cur.get('hits_per_min',0):.1f}", "unit": ""},
                                    {"label": "Potencia",   "value": f"{imu_cur.get('mean_int_g',0):.2f}",   "unit": "g"}]
                 if _kpi_cards:
-                    pdf.metric_row(_kpi_cards[:4])
+                    pdf.metric_table(_kpi_cards[:4])
                     pdf.spacer(0.1)
 
                 pdf.card("Estado de la sesión", [overall_clean],

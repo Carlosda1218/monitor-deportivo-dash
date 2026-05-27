@@ -1390,7 +1390,7 @@ class AnalysisView:
                 _bpm_status, _bpm_label = "ok",    f"Zona moderada-alta — pico {peak_bpm:.0f} lpm"
             pdf.status_badge(_bpm_label, _bpm_status)
 
-            pdf.metric_row([
+            pdf.metric_table([
                 {"label": "Rondas",       "value": str(rounds_done),  "unit": f"de {n_rounds_cfg}"},
                 {"label": "Pico BPM",     "value": f"{peak_bpm:.0f}", "unit": "lpm"},
                 {"label": "Impactos IMU", "value": str(total_impacts), "unit": f"{total_dado}D / {total_recibido}R"},
@@ -1467,7 +1467,7 @@ class AnalysisView:
                     "Puntuación estimada (WT)",
                     "Basado en umbrales WT-ESP · no reemplaza marcador oficial",
                 )
-                pdf.metric_row([
+                pdf.metric_table([
                     {"label": "Pts marcados",     "value": str(sc["pts_dado"]),
                      "unit": f"{sc['p_dado']} puntuables"},
                     {"label": "Pts recibidos",    "value": str(sc["pts_recv"]),

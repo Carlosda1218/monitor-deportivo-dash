@@ -604,7 +604,7 @@ def _build_signal_report_pdf(
         pdf.status_badge(status_label, status)
 
     if raw_metrics:
-        pdf.metric_row(raw_metrics)
+        pdf.metric_table(raw_metrics)
         pdf.spacer(0.1)
 
     pdf.card(
@@ -7411,7 +7411,7 @@ class SignalsView:
                         source=filename,
                     )
                     pdf.status_badge(f"Confianza dual {round(dual_score)}%", dual_status)
-                    pdf.metric_row([
+                    pdf.metric_table([
                         {"label": "Frames pareados", "value": int(_num(duel.get("frames_paired"))), "unit": "rojo+azul"},
                         {"label": "Distancia media", "value": f"{_num(duel_metrics.get('avg_distance')):.3f}", "unit": "normalizada"},
                         {"label": "Intercambios", "value": int(_num(duel_metrics.get("exchange_count"))), "unit": "posibles"},
@@ -7513,7 +7513,7 @@ class SignalsView:
                     source=filename,
                 )
                 pdf.status_badge(f"Calidad de pose {quality_pct}%", status)
-                pdf.metric_row([
+                pdf.metric_table([
                     {"label": "Frames analizados", "value": int(_num(summary.get("frames_analyzed"))), "unit": "muestras"},
                     {"label": "ROM tren inferior", "value": f"{_num(metrics.get('lower_rom')):.1f}", "unit": "grados"},
                     {"label": "Asimetría pierna", "value": f"{max(_num(metrics.get('knee_asym')), _num(metrics.get('hip_asym'))):.1f}", "unit": "grados"},
