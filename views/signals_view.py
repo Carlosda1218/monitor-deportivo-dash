@@ -84,6 +84,7 @@ except Exception as e:
 _POSE_JOB_CACHE: dict[str, dict] = {}
 _POSE_JOB_TTL_SECONDS = 4 * 60 * 60
 _POSE_JOB_MAX_ITEMS = 8
+_POSE_ANALYSIS_VERSION = "shape_guard_v3_2026_05_27"
 _REPLAY_FRAME_CACHE: dict[tuple, dict] = {}
 _REPLAY_FRAME_CACHE_TTL_SECONDS = 20 * 60
 _REPLAY_FRAME_CACHE_MAX_ITEMS = 64
@@ -141,6 +142,7 @@ def _slim_pose_report(report_data: dict, job_id: str) -> dict:
         "processing_s": report_data.get("processing_s"),
         "time_limited": bool(report_data.get("time_limited")),
         "has_duel": bool(report_data.get("duel")),
+        "analyzer_version": report_data.get("analyzer_version") or _POSE_ANALYSIS_VERSION,
     }
 
 
@@ -1576,6 +1578,8 @@ def kpi_grid_imu(n_hits, hits_per_min, mean_int, max_int):
 class SignalsView:
     """Vista de análisis de sesión: ECG/HRV e IMU en tiempo real."""
 
+    _callbacks_registered = False
+
     # Soporta distintos nombres por si en DB guardaste códigos distintos
     _SENSOR_ALIASES = {
         "ECG": {"ECG"},
@@ -1589,7 +1593,9 @@ class SignalsView:
         self.app = app
         self.db = db
         self.S = sensors_module
-        self._register_callbacks()
+        if not SignalsView._callbacks_registered:
+            self._register_callbacks()
+            SignalsView._callbacks_registered = True
 
     def _safe_int(self, x):
         try:
@@ -6397,6 +6403,9 @@ class SignalsView:
                     "pose_contaminada":              "Pose mezclada",
                     "sin_evidencia_atleta":          "Sin atleta claro",
                     "cuerpo_cruzado":                "Cuerpo cruzado",
+                    "esqueleto_colapsado":           "Esqueleto dudoso",
+                    "casco_sin_peto_coherente":      "Casco dudoso",
+                    "cuerpo_recortado":              "Cuerpo recortado",
                     "oclusion_parcial":              "Oclusión",
                     "color_contrario_en_pose":       "Color cruzado",
                     "peto_no_aislado":               "Peto parcial",
@@ -7259,6 +7268,20 @@ class SignalsView:
                     className="text-muted",
                     style={"fontSize": "13px"},
                 ), ""
+
+            if (pose_data or {}).get("analyzer_version") != _POSE_ANALYSIS_VERSION:
+                return html.Div(
+                    className="card",
+                    style={"borderLeft": "4px solid #f0a832"},
+                    children=[
+                        html.H4("Lectura biomecÇ­nica anterior", className="card-title"),
+                        html.P(
+                            "Actualizamos el filtro de confianza para evitar falsos positivos de atleta. "
+                            "Ejecuta de nuevo el anÇ­lisis para regenerar frames y grÇ­ficas con la versiÇün actual.",
+                            className="text-muted",
+                        ),
+                    ],
+                ), "Lectura anterior invalidada por mejora del analizador."
 
             job_id = (pose_data or {}).get("job_id")
             cached = _pose_cache_get(job_id)

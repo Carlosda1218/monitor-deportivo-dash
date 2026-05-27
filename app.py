@@ -2492,9 +2492,7 @@ def render_athlete_card_v2(user_id):
         html.P("Sin check-ins suficientes para mostrar tendencia.", className="text-muted"),
     ])
 
-    # Alertas card
-    _alert_note = ""  # generado en el callback lazy junto con la nota de coaching
-
+    # Alertas card — nota IA inyectada lazily por load_athlete_card_ai_note
     alerts_card = html.Div(className="card", style={"marginBottom": "14px"}, children=[
         html.H4("Alertas activas", className="card-title"),
         *([html.Div(className="alert-item alert-item--warn", children=[
@@ -2506,11 +2504,7 @@ def render_athlete_card_v2(user_id):
         ]) for a in active_alerts[:4]]
         if active_alerts else
         [html.P("Sin alertas activas hoy.", className="text-muted")]),
-        *([html.P(
-            _alert_note,
-            style={"fontSize": "11px", "color": "var(--neon)", "marginTop": "8px",
-                   "paddingLeft": "24px", "lineHeight": "1.4"},
-        )] if _alert_note else []),
+        html.Div(id="athlete-alert-note"),  # rellenado por load_athlete_card_ai_note
     ])
 
     resources_card = html.Div(className="card profile-links-card", children=[
@@ -2669,7 +2663,7 @@ def render_athlete_card_v2(user_id):
                         children=html.Div(
                             id="athlete-card-ai-note",
                             children=html.P(
-                                "Pulsa “Generar análisis IA” para crear una lectura contextual del atleta seleccionado.",
+                                'Pulsa "Generar análisis IA" para crear una lectura contextual del atleta seleccionado.',
                                 className="text-muted",
                             ),
                         )),
@@ -2698,18 +2692,24 @@ def render_athlete_card_v2(user_id):
 
 
 @app.callback(
-    Output("athlete-card-ai-note", "children"),
+    Output("athlete-card-ai-note",  "children"),
+    Output("athlete-alert-note",    "children"),
     Input("btn-athlete-card-ai-note", "n_clicks"),
     Input("athlete-select-v2", "value"),
     prevent_initial_call=True,
 )
 def load_athlete_card_ai_note(n_ai, user_id):
+    _empty_alert = html.Span()   # placeholder vacío para el output de alertas
+
     if not user_id:
         raise PreventUpdate
     if callback_context.triggered_id != "btn-athlete-card-ai-note":
-        return html.P(
-            "Atleta seleccionado. Pulsa “Generar análisis IA” para crear una lectura contextual sin bloquear la navegación.",
-            className="text-muted",
+        return (
+            html.P(
+                'Atleta seleccionado. Pulsa "Generar análisis IA" para crear una lectura contextual sin bloquear la navegación.',
+                className="text-muted",
+            ),
+            _empty_alert,
         )
     if not n_ai:
         raise PreventUpdate
@@ -2760,12 +2760,38 @@ def load_athlete_card_ai_note(n_ai, user_id):
     except Exception:
         pass
 
+    # Nota IA sobre la alerta más crítica (Haiku, no bloquea si falla)
+    alert_note_el = _empty_alert
+    _active_alerts = _report.get("alerts") or []
+    if _active_alerts:
+        try:
+            import ai_insights as _AI
+            _alert_txt = _AI.generate_alert_note(
+                _active_alerts[0],
+                athlete_name=name,
+                sport=sport,
+            )
+            if _alert_txt:
+                alert_note_el = html.P(
+                    _alert_txt,
+                    style={
+                        "fontSize": "11px", "color": "var(--neon)",
+                        "marginTop": "8px",  "paddingLeft": "24px",
+                        "lineHeight": "1.4",
+                    },
+                )
+        except Exception:
+            pass
+
     if not note:
-        return html.P(
-            "Configura ANTHROPIC_API_KEY en .env para activar el análisis narrativo con IA.",
-            className="text-muted",
+        return (
+            html.P(
+                "Configura ANTHROPIC_API_KEY en .env para activar el análisis narrativo con IA.",
+                className="text-muted",
+            ),
+            alert_note_el,
         )
-    return dcc.Markdown(note, className="ai-note")
+    return dcc.Markdown(note, className="ai-note"), alert_note_el
 
 
 @app.callback(
@@ -4095,7 +4121,7 @@ def _coach_jornada_layout_v2(uid_int: int, sport: str):
                                 children=html.Div(
                                     id="sesion-team-ai-note",
                                     children=html.P(
-                                        "Pulsa “Generar resumen IA” cuando quieras abrir la lectura del equipo.",
+                                        'Pulsa "Generar resumen IA" cuando quieras abrir la lectura del equipo.',
                                         className="text-muted",
                                         style={"fontSize": "13px"},
                                     ),
@@ -4931,7 +4957,7 @@ def view_sesion():
                             children=html.Div(
                                 id="sesion-ai-note-output",
                                 children=html.P(
-                                    "Pulsa “Generar lectura IA” cuando quieras abrir el análisis del día.",
+                                    'Pulsa "Generar lectura IA" cuando quieras abrir el análisis del día.',
                                     className="text-muted",
                                     style={"fontSize": "13px"},
                                 ),
@@ -10371,7 +10397,7 @@ def load_sesion_ai_note(n_ai, pathname):
         raise PreventUpdate
     if callback_context.triggered_id != "btn-sesion-ai-note":
         return html.P(
-            "Lectura lista para generarse. Pulsa “Generar lectura IA” cuando quieras el análisis del día.",
+            'Lectura lista para generarse. Pulsa "Generar lectura IA" cuando quieras el análisis del día.',
             className="text-muted",
             style={"fontSize": "13px"},
         )
@@ -10446,7 +10472,7 @@ def load_sesion_team_ai_note(n_ai, pathname):
         raise PreventUpdate
     if callback_context.triggered_id != "btn-sesion-team-ai-note":
         return html.P(
-            "Resumen listo para generarse. Pulsa “Generar resumen IA” cuando quieras abrir la lectura del equipo.",
+            'Resumen listo para generarse. Pulsa "Generar resumen IA" cuando quieras abrir la lectura del equipo.',
             className="text-muted",
             style={"fontSize": "13px"},
         )

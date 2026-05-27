@@ -859,11 +859,15 @@ def _build_scoring_section(state: dict, imu_data: list) -> list:
 
 class AnalysisView:
 
+    _callbacks_registered = False
+
     def __init__(self, app: dash.Dash, db, sensors):
         self.app = app
         self.db  = db
         self.S   = sensors
-        self._register_callbacks()
+        if not AnalysisView._callbacks_registered:
+            self._register_callbacks()
+            AnalysisView._callbacks_registered = True
 
     # ── Layout ────────────────────────────────────────────────────────────────
 

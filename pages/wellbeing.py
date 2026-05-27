@@ -1308,12 +1308,21 @@ def save_wellbeing(input_user_id, n, user_id, session_id, competition, weight, i
         if wellness < 65:
             _positives = [d["label"].replace("¿", "").replace("?", "") for d in top_positive]
             _risks = [d["label"].replace("¿", "").replace("?", "") for d in top_risks]
-            _quick_motivation = _build_fast_wellbeing_message(
-                wellness,
-                sport,
-                _positives,
-                _risks,
-            )
+            # Mensaje personalizado por IA (Haiku, ~1 s) con fallback local instantáneo
+            try:
+                import ai_insights as _AI
+                _aname = (db.get_user_by_id(int(user_id)) or {}).get("name", "atleta")
+                _quick_motivation = _AI.generate_wellbeing_message(
+                    wellness,
+                    sport=sport,
+                    athlete_name=_aname,
+                    positives=_positives,
+                    risks=_risks,
+                )
+            except Exception:
+                _quick_motivation = ""
+            if not _quick_motivation:
+                _quick_motivation = _build_fast_wellbeing_message(wellness, sport, _positives, _risks)
 
         explain = html.Div([
             html.P([html.Strong("Lectura general: "), estado]),

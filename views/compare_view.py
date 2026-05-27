@@ -562,11 +562,15 @@ class CompareView:
     3) Herramientas avanzadas por multi-upload (IMU/EMG/Resp)
     """
 
+    _callbacks_registered = False
+
     def __init__(self, app: dash.Dash, db, sensors_module):
         self.app = app
         self.db = db
         self.S = sensors_module
-        self._register_callbacks()
+        if not CompareView._callbacks_registered:
+            self._register_callbacks()
+            CompareView._callbacks_registered = True
 
     # ====================== LAYOUT ======================
 
