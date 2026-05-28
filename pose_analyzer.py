@@ -21,7 +21,7 @@ from mediapipe.tasks.python.core import base_options as base_opts
 # Ruta al modelo (debe estar junto a este archivo)
 _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pose_landmarker_lite.task")
 _logger = logging.getLogger(__name__)
-_ANALYZER_VERSION = "shape_guard_v5_keyframe_torso_2026_05_27"
+_ANALYZER_VERSION = "chamber_angle_v1_2026_05_28"
 try:
     _DUEL_KEYFRAME_CANDIDATES = max(6, int(os.getenv("COMBATIQ_DUEL_KEYFRAME_CANDIDATES", "48") or 48))
 except (TypeError, ValueError):
@@ -1308,6 +1308,69 @@ def _joint_rom(summary: dict, key: str) -> float:
     return round(_summary_value(summary, key, "max") - _summary_value(summary, key, "min"), 1)
 
 
+def _detect_chamber_angles(frames_data: list, fps: float) -> dict:
+    """
+    Detecta eventos de pateo en TKD buscando mínimos locales del ángulo de rodilla.
+
+    Un 'chamber' válido requiere:
+    - Antecedente: algún frame previo (ventana 8 frames) con rodilla >= 140° (postura de guardia/parado)
+    - Punto mínimo: ángulo de rodilla <= 120° (rodilla recogida = cámara)
+    - Posterior: algún frame siguiente (ventana 10 frames) con rodilla >= 130° (extensión / retorno)
+
+    Retorna dict con chamber_l / chamber_r, cada uno con:
+      min   – ángulo mínimo de cámara detectado (°), None si no hubo kicks
+      avg   – promedio de cámaras detectadas (°)
+      count – número de eventos de pateo detectados
+    """
+    ENTRY_MIN   = 140.0   # rodilla en guardia: >= este valor antes del kick
+    CHAMBER_MAX = 120.0   # cámara apretada: rodilla <= este valor
+    EXIT_MIN    = 130.0   # retorno tras kick: rodilla >= este valor
+    WINDOW_PRE  = 8       # frames de búsqueda hacia atrás (entry)
+    WINDOW_POST = 10      # frames de búsqueda hacia adelante (exit)
+    MIN_SKIP    = max(2, int(fps * 0.10))  # ~100 ms entre eventos (evita doble conteo)
+
+    result = {}
+    for side in ("l", "r"):
+        key = f"knee_{side}"
+        series = [f[key] for f in frames_data if isinstance(f.get(key), (int, float))]
+        if len(series) < 6:
+            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0}
+            continue
+
+        # Media móvil de 3 frames para reducir ruido de landmarks
+        smoothed = []
+        for i in range(len(series)):
+            window = series[max(0, i - 1): i + 2]
+            smoothed.append(sum(window) / len(window))
+
+        chambers = []
+        i = 1
+        while i < len(smoothed) - 1:
+            # Mínimo local
+            if smoothed[i] <= smoothed[i - 1] and smoothed[i] <= smoothed[i + 1]:
+                if smoothed[i] <= CHAMBER_MAX:
+                    pre_slice  = smoothed[max(0, i - WINDOW_PRE): i]
+                    post_slice = smoothed[i + 1: min(len(smoothed), i + 1 + WINDOW_POST)]
+                    entry_ok = any(v >= ENTRY_MIN for v in pre_slice)
+                    exit_ok  = any(v >= EXIT_MIN  for v in post_slice)
+                    if entry_ok and exit_ok:
+                        chambers.append(round(smoothed[i], 1))
+                        i += MIN_SKIP
+                        continue
+            i += 1
+
+        if chambers:
+            result[f"chamber_{side}"] = {
+                "min":   round(min(chambers), 1),
+                "avg":   round(sum(chambers) / len(chambers), 1),
+                "count": len(chambers),
+            }
+        else:
+            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0}
+
+    return result
+
+
 def _build_biomech_reading(summary: dict, frames_data: list, sport: str | None = None) -> dict:
     """
     Heurística deportiva sobre los ángulos ya calculados.
@@ -1390,6 +1453,44 @@ def _build_biomech_reading(summary: dict, frames_data: list, sport: str | None =
                 "title": "Simetría aceptable de tren inferior",
                 "text": "No aparece una diferencia lateral grande en rodilla/cadera dentro de esta muestra.",
             })
+        # ── Chamber angle insight (TKD exclusivo) ────────────────────────────
+        ch_l = summary.get("chamber_l") or {}
+        ch_r = summary.get("chamber_r") or {}
+        ch_count = (ch_l.get("count") or 0) + (ch_r.get("count") or 0)
+        if ch_count > 0:
+            ch_mins = [v for v in [ch_l.get("min"), ch_r.get("min")] if v is not None]
+            best_chamber = min(ch_mins) if ch_mins else None
+            if best_chamber is not None:
+                if best_chamber < 85:
+                    insights.append({
+                        "level": "ok",
+                        "title": f"Cámara explosiva ({best_chamber}°)",
+                        "text": (
+                            f"Se detectaron {ch_count} kick(s). "
+                            "La rodilla alcanza menos de 85° antes de la extensión — "
+                            "cámara apretada típica de competidores de élite WT."
+                        ),
+                    })
+                elif best_chamber < 100:
+                    insights.append({
+                        "level": "warn",
+                        "title": f"Cámara funcional ({best_chamber}°)",
+                        "text": (
+                            f"Se detectaron {ch_count} kick(s). "
+                            "La cámara es funcional pero hay margen para apretarla "
+                            "por debajo de 90° para mayor velocidad y disimulo."
+                        ),
+                    })
+                else:
+                    insights.append({
+                        "level": "alert",
+                        "title": f"Cámara telegráfica ({best_chamber}°)",
+                        "text": (
+                            f"Se detectaron {ch_count} kick(s). "
+                            "La rodilla no se recoge lo suficiente antes de la extensión "
+                            "(> 100°), lo que reduce velocidad y anticipa el movimiento al rival."
+                        ),
+                    })
     elif sport_key == "boxeo":
         if elbow_avg > 150:
             insights.append({
@@ -1452,18 +1553,30 @@ def _build_biomech_reading(summary: dict, frames_data: list, sport: str | None =
     else:
         focus.append("Priorizar rangos, simetría y estabilidad antes de subir intensidad.")
 
+    metrics: dict = {
+        "lower_rom": lower_rom,
+        "upper_rom": upper_rom,
+        "knee_asym": knee_asym,
+        "hip_asym": hip_asym,
+        "elbow_asym": elbow_asym,
+        "shoulder_asym": shoulder_asym,
+        **{f"rom_{k}": v for k, v in rom.items()},
+    }
+    # Exponer métricas de chamber para TKD (usadas en UI y PDF)
+    if sport_key == "taekwondo":
+        _ch_l = summary.get("chamber_l") or {}
+        _ch_r = summary.get("chamber_r") or {}
+        metrics["chamber_min_l"]  = _ch_l.get("min")
+        metrics["chamber_min_r"]  = _ch_r.get("min")
+        metrics["chamber_avg_l"]  = _ch_l.get("avg")
+        metrics["chamber_avg_r"]  = _ch_r.get("avg")
+        metrics["kick_count_l"]   = _ch_l.get("count", 0)
+        metrics["kick_count_r"]   = _ch_r.get("count", 0)
+
     return {
         "sport": sport_key,
         "quality_ratio": quality_ratio,
-        "metrics": {
-            "lower_rom": lower_rom,
-            "upper_rom": upper_rom,
-            "knee_asym": knee_asym,
-            "hip_asym": hip_asym,
-            "elbow_asym": elbow_asym,
-            "shoulder_asym": shoulder_asym,
-            **{f"rom_{k}": v for k, v in rom.items()},
-        },
+        "metrics": metrics,
         "insights": insights[:4],
         "focus": focus,
     }
@@ -2310,6 +2423,12 @@ def _analyze_video_duel(
         candidates_seen, misses["blue"], confidences["blue"], continuity["blue"],
         track_rejections["blue"], rejection_reasons["blue"],
     )
+    # TKD-only: ángulo de cámara de pateo para cada peleador
+    if _sport_key(sport) == "taekwondo":
+        if target_frames["red"]:
+            red_summary.update(_detect_chamber_angles(target_frames["red"], fps))
+        if target_frames["blue"]:
+            blue_summary.update(_detect_chamber_angles(target_frames["blue"], fps))
     red_target = _target_info_from_summary("red", red_summary, processed_counts["red"], candidates_seen, misses["red"], tracks["red"])
     blue_target = _target_info_from_summary("blue", blue_summary, processed_counts["blue"], candidates_seen, misses["blue"], tracks["blue"])
     red_biomech = _build_biomech_reading(red_summary, target_frames["red"], sport=sport)
@@ -2693,6 +2812,9 @@ def analyze_video(
         for _note in (_f.get("landmark_warnings") or []):
             _wb[_note] = _wb.get(_note, 0) + 1
     summary["warning_breakdown"] = _wb
+    # ── TKD-only: ángulo de cámara de pateo ──────────────────────────────────
+    if _sport_key(sport) == "taekwondo" and frames_data:
+        summary.update(_detect_chamber_angles(frames_data, fps))
     _raw_confidence = round(float(np.mean(confidences)), 3) if confidences else 0.0
     _coverage = round(processed / max(sampled, 1), 3)
     _visible_confidence = round(_raw_confidence * (0.45 + 0.55 * _coverage), 3)

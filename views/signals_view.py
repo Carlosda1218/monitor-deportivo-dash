@@ -84,7 +84,7 @@ except Exception as e:
 _POSE_JOB_CACHE: dict[str, dict] = {}
 _POSE_JOB_TTL_SECONDS = 4 * 60 * 60
 _POSE_JOB_MAX_ITEMS = 8
-_POSE_ANALYSIS_VERSION = "shape_guard_v5_keyframe_torso_2026_05_27"
+_POSE_ANALYSIS_VERSION = "chamber_angle_v1_2026_05_28"
 _REPLAY_FRAME_CACHE: dict[tuple, dict] = {}
 _REPLAY_FRAME_CACHE_TTL_SECONDS = 20 * 60
 _REPLAY_FRAME_CACHE_MAX_ITEMS = 64
@@ -7038,6 +7038,35 @@ class SignalsView:
                         _metric_card("Asimetría pierna", f"{lower_asym}°", "Rodilla/cadera"),
                         _metric_card("ROM tren superior", f"{metrics.get('upper_rom', 0)}°", "Codo + hombro"),
                     ]),
+                    # ── Chamber angle TKD-only ────────────────────────────────
+                    *([
+                        html.H5("⚡ Cámara de pateo (TKD)", style={"margin": "12px 0 6px", "color": "var(--neon)"}),
+                        html.P(
+                            "Ángulo de rodilla al momento de máxima flexión pre-extensión. "
+                            "Referencia WT élite: < 85° (pierna dominante).",
+                            className="text-muted",
+                            style={"fontSize": "12px", "marginBottom": "8px"},
+                        ),
+                        html.Div(className="kpis session-kpis", children=[
+                            _metric_card(
+                                "Cámara pierna izq",
+                                f"{metrics.get('chamber_min_l') or '--'}°",
+                                f"{metrics.get('kick_count_l') or 0} kick(s) detectados",
+                            ),
+                            _metric_card(
+                                "Cámara pierna der",
+                                f"{metrics.get('chamber_min_r') or '--'}°",
+                                f"{metrics.get('kick_count_r') or 0} kick(s) detectados",
+                            ),
+                            _metric_card(
+                                "Total kicks",
+                                str((metrics.get('kick_count_l') or 0) + (metrics.get('kick_count_r') or 0)),
+                                "Eventos de pateo detectados",
+                            ),
+                        ]),
+                    ] if biomech.get("sport") == "taekwondo" and
+                       ((metrics.get("kick_count_l") or 0) + (metrics.get("kick_count_r") or 0)) > 0
+                    else []),
                     _joint_reliability_row(summary, int(target_info.get("selected_frames") or 0) or len(frames)),
                     html.Ul(
                         [
@@ -7592,12 +7621,24 @@ class SignalsView:
                     source=filename,
                 )
                 pdf.status_badge(f"Calidad de pose {quality_pct}%", status)
-                pdf.metric_table([
+                _pdf_pose_rows = [
                     {"label": "Frames analizados", "value": int(_num(summary.get("frames_analyzed"))), "unit": "muestras"},
                     {"label": "ROM tren inferior", "value": f"{_num(metrics.get('lower_rom')):.1f}", "unit": "grados"},
                     {"label": "Asimetría pierna", "value": f"{max(_num(metrics.get('knee_asym')), _num(metrics.get('hip_asym'))):.1f}", "unit": "grados"},
                     {"label": "ROM tren superior", "value": f"{_num(metrics.get('upper_rom')):.1f}", "unit": "grados"},
-                ])
+                ]
+                # Añadir métricas de cámara de pateo solo en TKD
+                if biomech.get("sport") == "taekwondo":
+                    _ch_l = metrics.get("chamber_min_l")
+                    _ch_r = metrics.get("chamber_min_r")
+                    _kicks = (metrics.get("kick_count_l") or 0) + (metrics.get("kick_count_r") or 0)
+                    if _kicks > 0:
+                        _pdf_pose_rows += [
+                            {"label": "Cámara pierna izq (mín)", "value": f"{_ch_l:.1f}" if _ch_l is not None else "--", "unit": "grados"},
+                            {"label": "Cámara pierna der (mín)", "value": f"{_ch_r:.1f}" if _ch_r is not None else "--", "unit": "grados"},
+                            {"label": "Kicks detectados", "value": int(_kicks), "unit": "eventos"},
+                        ]
+                pdf.metric_table(_pdf_pose_rows)
 
                 pdf.card(
                     "Objetivo analizado",
