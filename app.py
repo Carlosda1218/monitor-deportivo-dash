@@ -118,6 +118,11 @@ def _no_cache_html(response):
     return response
 
 
+@server.route("/health", methods=["GET"])
+def health_check():
+    return {"status": "ok", "app": "CombatIQ"}, 200
+
+
 @server.route("/debug/analyzer-version", methods=["GET"])
 def debug_analyzer_version():
     """Tiny local diagnostic to confirm the running server loaded current code."""
