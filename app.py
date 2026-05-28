@@ -1,4 +1,16 @@
-﻿import os, io, base64, json, csv, webbrowser, importlib, traceback, urllib.parse, random, logging
+﻿# ── GEVENT MONKEY-PATCH — DEBE ser la primera importación del archivo ─────────
+# Convierte stdlib (socket, ssl, threading, time.sleep, etc) en cooperativos.
+# Sin esto, los HTTP calls a Anthropic/Supabase bloquean el thread del worker
+# y la app se congela para todos los usuarios mientras se ejecuta cualquier IA.
+# En local Windows con Python desktop puede fallar el import — silenciamos para
+# no romper el dev; en Railway (Linux + gunicorn gevent worker) siempre carga OK.
+try:
+    from gevent import monkey as _gevent_monkey
+    _gevent_monkey.patch_all()
+except Exception:
+    pass
+
+import os, io, base64, json, csv, webbrowser, importlib, traceback, urllib.parse, random, logging
 from threading import Timer
 from datetime import datetime
 

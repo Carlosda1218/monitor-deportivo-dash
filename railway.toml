@@ -5,7 +5,11 @@ builder = "nixpacks"
 # IMPORTANTE: --preload + --workers 1 obligatorio para Dash
 # Sin --preload, los workers tienen self.registered_paths vacío
 # y Dash falla con "dash is not a registered library"
-startCommand = "gunicorn app:server --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 --preload"
+#
+# --worker-class gevent: I/O cooperativo. HTTP calls (Anthropic, Supabase)
+# liberan el worker para servir otros requests mientras esperan respuesta.
+# REQUIERE que app.py haga monkey.patch_all() como primera importación.
+startCommand = "gunicorn app:server --bind 0.0.0.0:$PORT --workers 1 --worker-class gevent --worker-connections 100 --timeout 300 --preload"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
