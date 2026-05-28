@@ -3940,6 +3940,55 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
   font-size:12px; font-weight:500; transition:background .15s,color .15s,border-color .15s;
   white-space:nowrap; user-select:none;
 }
+
+/* ============================================================ */
+/*  A11Y — Design-1 Phase 1  (2026-05-28)                       */
+/*  Focus visible + reduce motion (WCAG 2.4.7 / 2.3.3)          */
+/* ============================================================ */
+
+/* Focus visible — usuarios de teclado ven dónde están enfocados */
+.btn:focus-visible,
+.btn-primary:focus-visible,
+.btn--primary:focus-visible,
+.btn-ghost:focus-visible,
+.btn-danger:focus-visible,
+.btn-xs:focus-visible,
+.nav-link:focus-visible,
+.tile:focus-visible,
+.auth-demo__pill:focus-visible,
+.auth-btn-primary:focus-visible,
+.session-pill:focus-visible,
+.session-chips .dash-checklist-item label:focus-visible,
+.sidebar-toggle:focus-visible,
+.auth-theme-btn:focus-visible,
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible{
+  outline: 2px solid var(--neon);
+  outline-offset: 2px;
+  border-radius: var(--r-md);
+}
+/* Quita el outline cuando se usa mouse (mantiene visible solo con teclado) */
+.btn:focus:not(:focus-visible),
+.btn-primary:focus:not(:focus-visible),
+.nav-link:focus:not(:focus-visible),
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible){
+  outline: none;
+}
+
+/* Respeta preferencia "reduce motion" del SO/navegador (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .session-chips .dash-checklist-item label:hover{ border-color:var(--neon); color:var(--neon); }
 .session-chips .dash-checklist-item input[type=checkbox]:checked + label{
   background:var(--neon); border-color:var(--neon); color:var(--bg); font-weight:700;

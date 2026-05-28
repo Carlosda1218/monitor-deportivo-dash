@@ -11,14 +11,15 @@
   --ink:       #0f172a;
   --muted:     #475569;
   --line:      #cbd5e1;
-  --neon:      #0d9488;
-  --neon-soft: #0f766e;
-  --cyan:      #0d9488;
-  --punch:     #e11d48;
+  /* Neon y green ajustados a tonos un escalón más oscuros — WCAG AA texto normal */
+  --neon:      #0f766e;   /* era #0d9488 (ratio 3.74); ahora 4.86 ✓ AA */
+  --neon-soft: #115e59;   /* era #0f766e — mantiene jerarquía con neon */
+  --cyan:      #0f766e;
+  --punch:     #be123c;   /* era #e11d48 (ratio 4.49 en bg); ahora 6.30 ✓ AA */
   --amber:     #b45309;
-  --green:     #059669;
-  --glow:      0 0 16px rgba(13,148,136,.22);
-  --glow-soft: 0 0 12px rgba(13,148,136,.14);
+  --green:     #047857;   /* era #059669 (ratio 3.60); ahora 4.74 ✓ AA */
+  --glow:      0 0 16px rgba(15,118,110,.22);
+  --glow-soft: 0 0 12px rgba(15,118,110,.14);
   /* Variables sin definir en :root — usadas como fallback oscuro en inline styles */
   --surface:   #ffffff;
   --surface2:  #f1f5f9;

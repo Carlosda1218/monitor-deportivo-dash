@@ -70,10 +70,15 @@ def _check_pw(plain: str, stored):
 layout = html.Div(className="auth-wrap", children=[
 
     # Botón toggle de tema
-    html.Button(id="btn-auth-theme", className="auth-theme-btn", children="☀"),
+    html.Button(
+        id="btn-auth-theme",
+        className="auth-theme-btn",
+        children="☀",
+        **{"aria-label": "Cambiar tema claro / oscuro"},
+    ),
 
     # Panel izquierdo — Branding
-    html.Div(className="auth-left", children=[
+    html.Div(className="auth-left", **{"role": "complementary", "aria-label": "Información de CombatIQ"}, children=[
         html.Div(className="auth-left__brand", children=[
             html.Div(className="auth-left__mark", children=[
                 html.Img(src="/assets/logo_combatiq.svg", className="auth-left__logo"),
@@ -116,19 +121,31 @@ layout = html.Div(className="auth-wrap", children=[
     ]),
 
     # Panel derecho — Formulario
-    html.Div(className="auth-right", children=[
+    html.Div(className="auth-right", **{"role": "main"}, children=[
         html.Div(className="auth-card", children=[
 
             html.H2("Bienvenido de vuelta", className="auth-title"),
             html.P("Inicia sesión para acceder a tu panel.", className="auth-subtitle"),
 
             html.Div(className="auth-field", children=[
-                html.Label("Correo electrónico"),
-                dcc.Input(id="login-email", type="email", placeholder="tu@correo.com"),
+                html.Label("Correo electrónico", htmlFor="login-email"),
+                dcc.Input(
+                    id="login-email",
+                    type="email",
+                    placeholder="tu@correo.com",
+                    autoComplete="email",
+                    required=True,
+                ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Contraseña"),
-                dcc.Input(id="login-pass", type="password", placeholder="••••••••"),
+                html.Label("Contraseña", htmlFor="login-pass"),
+                dcc.Input(
+                    id="login-pass",
+                    type="password",
+                    placeholder="••••••••",
+                    autoComplete="current-password",
+                    required=True,
+                ),
             ]),
 
             html.Div(className="auth-remember", children=[
@@ -142,20 +159,48 @@ layout = html.Div(className="auth-wrap", children=[
                 dcc.Link("¿Olvidaste tu contraseña?", href="/recuperar-password", className="auth-remember-link"),
             ]),
 
-            html.Button("Entrar", id="btn-login", className="auth-btn-primary"),
-            html.Div(id="login-msg", className="auth-msg"),
+            html.Button(
+                "Entrar",
+                id="btn-login",
+                className="auth-btn-primary",
+                type="submit",
+                **{"aria-label": "Iniciar sesión"},
+            ),
+            html.Div(
+                id="login-msg",
+                className="auth-msg",
+                **{"role": "status", "aria-live": "polite"},
+            ),
             html.Div(id="login-redirect"),
 
             html.Div(className="auth-switch", children=[
                 "¿No tienes cuenta? ", dcc.Link("Crear cuenta", href="/registro"),
             ]),
 
-            html.Div(className="auth-demo", children=[
+            html.Div(className="auth-demo", **{"role": "region", "aria-label": "Acceso a cuentas demo"}, children=[
                 html.Div("Explorar sin cuenta", className="auth-demo__title"),
                 html.Div(className="auth-demo__pills", children=[
-                    html.A("Atleta\nTaekwondo", id="btn-demo-login", href="/demo/atleta", className="auth-demo__pill"),
-                    html.A("Coach\nTaekwondo", id="btn-demo-coach-login", href="/demo/coach-tkd", className="auth-demo__pill"),
-                    html.A("Coach\nBoxeo", id="btn-demo-coach-boxeo-login", href="/demo/coach-boxeo", className="auth-demo__pill"),
+                    html.A(
+                        "Atleta\nTaekwondo",
+                        id="btn-demo-login",
+                        href="/demo/atleta",
+                        className="auth-demo__pill",
+                        **{"aria-label": "Entrar como atleta demo de Taekwondo"},
+                    ),
+                    html.A(
+                        "Coach\nTaekwondo",
+                        id="btn-demo-coach-login",
+                        href="/demo/coach-tkd",
+                        className="auth-demo__pill",
+                        **{"aria-label": "Entrar como coach demo de Taekwondo"},
+                    ),
+                    html.A(
+                        "Coach\nBoxeo",
+                        id="btn-demo-coach-boxeo-login",
+                        href="/demo/coach-boxeo",
+                        className="auth-demo__pill",
+                        **{"aria-label": "Entrar como coach demo de Boxeo"},
+                    ),
                 ]),
                 html.Div("Datos realistas de ejemplo · sin registro", className="auth-demo__hint"),
             ]),
