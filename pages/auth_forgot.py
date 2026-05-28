@@ -76,9 +76,14 @@ def _local_code_box(token: str, expires_at: str):
 
 
 layout = html.Div(className="auth-wrap", children=[
-    html.Button(id="btn-auth-theme-reset", className="auth-theme-btn", children="☀"),
+    html.Button(
+        id="btn-auth-theme-reset",
+        className="auth-theme-btn",
+        children="☀",
+        **{"aria-label": "Cambiar tema claro / oscuro"},
+    ),
 
-    html.Div(className="auth-left", children=[
+    html.Div(className="auth-left", **{"role": "complementary", "aria-label": "Información de CombatIQ"}, children=[
         html.Div(className="auth-left__brand", children=[
             html.Div(className="auth-left__mark", children=[
                 html.Img(src="/assets/logo_combatiq.svg", className="auth-left__logo"),
@@ -116,7 +121,7 @@ layout = html.Div(className="auth-wrap", children=[
         html.Div("© 2026 CombatIQ", className="auth-left__footer"),
     ]),
 
-    html.Div(className="auth-right", children=[
+    html.Div(className="auth-right", **{"role": "main"}, children=[
         html.Div(className="auth-card", children=[
             html.H2("Restablecer contraseña", className="auth-title"),
             html.P(
@@ -125,28 +130,63 @@ layout = html.Div(className="auth-wrap", children=[
             ),
 
             html.Div(className="auth-field", children=[
-                html.Label("Correo electrónico"),
-                dcc.Input(id="forgot-email", type="email", placeholder="tu@correo.com"),
+                html.Label("Correo electrónico", htmlFor="forgot-email"),
+                dcc.Input(
+                    id="forgot-email", type="email", placeholder="tu@correo.com",
+                    autoComplete="email", required=True,
+                ),
             ]),
-            html.Button("Enviar código", id="btn-forgot-request", className="auth-btn-primary"),
-            html.Div(id="forgot-request-msg", className="auth-msg"),
+            html.Button(
+                "Enviar código",
+                id="btn-forgot-request",
+                className="auth-btn-primary",
+                type="submit",
+                **{"aria-label": "Solicitar código de recuperación"},
+            ),
+            html.Div(
+                id="forgot-request-msg",
+                className="auth-msg",
+                **{"role": "status", "aria-live": "polite"},
+            ),
             html.Div(id="forgot-local-code"),
 
             html.Div(style={"height": "16px"}),
             html.Div(className="auth-field", children=[
-                html.Label("Código temporal"),
-                dcc.Input(id="forgot-token", type="text", placeholder="Pega aquí el código recibido"),
+                html.Label("Código temporal", htmlFor="forgot-token"),
+                dcc.Input(
+                    id="forgot-token", type="text",
+                    placeholder="Pega aquí el código recibido",
+                    autoComplete="one-time-code",
+                ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Nueva contraseña"),
-                dcc.Input(id="forgot-pass", type="password", placeholder="Mínimo 8 caracteres"),
+                html.Label("Nueva contraseña", htmlFor="forgot-pass"),
+                dcc.Input(
+                    id="forgot-pass", type="password",
+                    placeholder="Mínimo 8 caracteres",
+                    autoComplete="new-password", minLength=8,
+                ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Confirmar nueva contraseña"),
-                dcc.Input(id="forgot-pass2", type="password", placeholder="Repite la contraseña"),
+                html.Label("Confirmar nueva contraseña", htmlFor="forgot-pass2"),
+                dcc.Input(
+                    id="forgot-pass2", type="password",
+                    placeholder="Repite la contraseña",
+                    autoComplete="new-password",
+                ),
             ]),
-            html.Button("Cambiar contraseña", id="btn-forgot-reset", className="auth-btn-primary"),
-            html.Div(id="forgot-reset-msg", className="auth-msg"),
+            html.Button(
+                "Cambiar contraseña",
+                id="btn-forgot-reset",
+                className="auth-btn-primary",
+                type="submit",
+                **{"aria-label": "Cambiar contraseña"},
+            ),
+            html.Div(
+                id="forgot-reset-msg",
+                className="auth-msg",
+                **{"role": "status", "aria-live": "polite"},
+            ),
             html.Div(id="forgot-redirect"),
 
             html.Div(className="auth-switch", children=[

@@ -376,7 +376,11 @@ def layout() -> html.Div:
         dcc.Download(id="dl-sessions-history"),
         page_head,
         html.Div(className="ecg-divider ecg-divider--spaced"),
-        html.Div(id="sesiones-msg", style={"marginBottom": "8px"}),
+        html.Div(
+            id="sesiones-msg",
+            style={"marginBottom": "8px"},
+            **{"role": "status", "aria-live": "polite"},
+        ),
         html.Div(id="sesiones-list", children=cards),
     ], className="page-content")
 

@@ -1348,7 +1348,12 @@ def layout():
                             ),
                         ]),
                     ]),
-                    html.Div(id="avatar-msg", className="text-muted", style={"fontSize": "12px", "marginTop": "4px"}),
+                    html.Div(
+                        id="avatar-msg",
+                        className="text-muted",
+                        style={"fontSize": "12px", "marginTop": "4px"},
+                        **{"role": "status", "aria-live": "polite"},
+                    ),
                 ]),
                 html.Div(className="card profile-focus-card", children=[
                     html.H4("Lo que más influye hoy", className="card-title"),
@@ -1520,7 +1525,11 @@ def layout():
                                 ]),
                                 html.Div(style={"marginTop": "14px", "display": "flex", "gap": "10px", "alignItems": "center", "flexWrap": "wrap"}, children=[
                                     html.Button("Guardar perfil", id="dash-save-profile", className="btn btn-primary"),
-                                    html.Div(id="dash-profile-msg", className="text-muted"),
+                                    html.Div(
+                                        id="dash-profile-msg",
+                                        className="text-muted",
+                                        **{"role": "status", "aria-live": "polite"},
+                                    ),
                                 ]),
                             ]),
                         ],

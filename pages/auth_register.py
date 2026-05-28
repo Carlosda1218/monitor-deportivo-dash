@@ -60,10 +60,15 @@ def strength_label_color(score: int):
 layout = html.Div(className="auth-wrap", children=[
 
     # Botón toggle de tema
-    html.Button(id="btn-auth-theme-reg", className="auth-theme-btn", children="☀"),
+    html.Button(
+        id="btn-auth-theme-reg",
+        className="auth-theme-btn",
+        children="☀",
+        **{"aria-label": "Cambiar tema claro / oscuro"},
+    ),
 
     # Panel izquierdo — Branding
-    html.Div(className="auth-left", children=[
+    html.Div(className="auth-left", **{"role": "complementary", "aria-label": "Información de CombatIQ"}, children=[
         html.Div(className="auth-left__brand", children=[
             html.Div(className="auth-left__mark", children=[
                 html.Img(src="/assets/logo_combatiq.svg", className="auth-left__logo"),
@@ -106,7 +111,7 @@ layout = html.Div(className="auth-wrap", children=[
     ]),
 
     # Panel derecho — Formulario
-    html.Div(className="auth-right", children=[
+    html.Div(className="auth-right", **{"role": "main"}, children=[
         html.Div(className="auth-card", children=[
 
             html.H2("Crea tu cuenta", className="auth-title"),
@@ -115,36 +120,52 @@ layout = html.Div(className="auth-wrap", children=[
         # Nombre + Correo en fila
         html.Div(className="auth-row", children=[
             html.Div(className="auth-field", children=[
-                html.Label("Nombre completo"),
-                dcc.Input(id="reg-name", type="text", placeholder="Tu nombre"),
+                html.Label("Nombre completo", htmlFor="reg-name"),
+                dcc.Input(
+                    id="reg-name", type="text", placeholder="Tu nombre",
+                    autoComplete="name", required=True,
+                ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Correo electrónico"),
-                dcc.Input(id="reg-email", type="email", placeholder="tu@correo.com"),
+                html.Label("Correo electrónico", htmlFor="reg-email"),
+                dcc.Input(
+                    id="reg-email", type="email", placeholder="tu@correo.com",
+                    autoComplete="email", required=True,
+                ),
             ]),
         ]),
 
         # Contraseña + fuerza
         html.Div(className="auth-field", children=[
-            html.Label("Contraseña"),
-            dcc.Input(id="reg-pass", type="password", placeholder="Mínimo 8 caracteres"),
+            html.Label("Contraseña", htmlFor="reg-pass"),
+            dcc.Input(
+                id="reg-pass", type="password", placeholder="Mínimo 8 caracteres",
+                autoComplete="new-password", required=True, minLength=8,
+            ),
             html.Div(className="pw-strength-track", children=[
                 html.Div(id="pw-bar", className="pw-strength-bar",
                          style={"width": "0%", "background": "var(--line)"}),
             ]),
-            html.Div(id="pw-label", className="pw-strength-label"),
+            html.Div(
+                id="pw-label",
+                className="pw-strength-label",
+                **{"aria-live": "polite"},
+            ),
         ]),
 
         # Confirmar contraseña
         html.Div(className="auth-field", children=[
-            html.Label("Confirmar contraseña"),
-            dcc.Input(id="reg-pass2", type="password", placeholder="Repite la contraseña"),
+            html.Label("Confirmar contraseña", htmlFor="reg-pass2"),
+            dcc.Input(
+                id="reg-pass2", type="password", placeholder="Repite la contraseña",
+                autoComplete="new-password", required=True,
+            ),
         ]),
 
         # Rol + Deporte en fila
         html.Div(className="auth-row", children=[
             html.Div(className="auth-field", children=[
-                html.Label("Rol"),
+                html.Label("Rol", htmlFor="reg-role"),
                 dcc.Dropdown(
                     id="reg-role",
                     options=[
@@ -156,7 +177,7 @@ layout = html.Div(className="auth-wrap", children=[
                 ),
             ]),
             html.Div(className="auth-field", children=[
-                html.Label("Deporte"),
+                html.Label("Deporte", htmlFor="reg-sport"),
                 dcc.Dropdown(
                     id="reg-sport",
                     options=[{"label": d, "value": d} for d in DEPORTES]
@@ -173,15 +194,25 @@ layout = html.Div(className="auth-wrap", children=[
             style={"display": "none"},
             children=[
                 html.Div(className="auth-field", children=[
-                    html.Label("Especifica tu deporte"),
+                    html.Label("Especifica tu deporte", htmlFor="reg-sport-custom"),
                     dcc.Input(id="reg-sport-custom", type="text",
                               placeholder="Ej: BJJ, Lucha olímpica, K-1…"),
                 ]),
             ],
         ),
 
-        html.Button("Crear cuenta", id="btn-register", className="auth-btn-primary"),
-        html.Div(id="reg-msg", className="auth-msg"),
+        html.Button(
+            "Crear cuenta",
+            id="btn-register",
+            className="auth-btn-primary",
+            type="submit",
+            **{"aria-label": "Crear cuenta"},
+        ),
+        html.Div(
+            id="reg-msg",
+            className="auth-msg",
+            **{"role": "status", "aria-live": "polite"},
+        ),
         html.Div(id="reg-redirect"),
 
         html.Div(className="auth-switch", children=[

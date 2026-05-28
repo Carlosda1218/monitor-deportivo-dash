@@ -16,6 +16,7 @@
   --neon-soft: #115e59;   /* era #0f766e — mantiene jerarquía con neon */
   --cyan:      #0f766e;
   --punch:     #be123c;   /* era #e11d48 (ratio 4.49 en bg); ahora 6.30 ✓ AA */
+  --punch-on-card: #be123c;  /* en light theme card=blanco, mismo color sirve */
   --amber:     #b45309;
   --green:     #047857;   /* era #059669 (ratio 3.60); ahora 4.74 ✓ AA */
   --glow:      0 0 16px rgba(15,118,110,.22);

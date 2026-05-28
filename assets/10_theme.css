@@ -16,8 +16,8 @@
   --card-elevated:#253041; /* card elevada */
   --ink:#f2f5fa;           /* texto primario */
   --ink-2:#cdd6e3;         /* texto secundario fuerte */
-  --muted:#a7b1bc;         /* texto terciario */
-  --muted-2:#6b7a8d;       /* texto muy atenuado */
+  --muted:#a7b1bc;         /* texto terciario (AA en cards: 6.51) */
+  --muted-2:#8896aa;       /* texto muy atenuado, AA cards: 4.71 (era #6b7a8d AA-large) */
   --line:#31445f;          /* bordes/dividers */
   --line-soft:rgba(49,68,95,.45); /* borde sutil */
 
@@ -27,6 +27,7 @@
   --neon-dim:rgba(47,183,196,.12);   /* fondo teal sutil */
   --cyan:#4f9fd9;
   --punch:#e45a5a;
+  --punch-on-card:#ff8585;            /* variante para uso en cards (AA: 6.03) */
   --punch-dim:rgba(228,90,90,.12);
   --amber:#f0a832;
   --amber-dim:rgba(240,168,50,.12);
@@ -335,7 +336,10 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
 }
 .btn-danger:hover{ filter:brightness(1.08); }
 .btn:disabled{ opacity:.45; cursor:not-allowed; transform:none !important; }
-.btn-xs{ padding:5px 11px; font-size:var(--text-xs); border-radius:var(--r-sm); white-space:nowrap; }
+.btn-xs{
+  padding:6px 12px; font-size:var(--text-xs); border-radius:var(--r-sm);
+  white-space:nowrap; min-height:28px;
+}
 .text-xs{ font-size:12px; }
 .step-circle{ display:flex; align-items:center; justify-content:center; width:22px; height:22px; min-width:22px; border-radius:50%; background:var(--neon); color:var(--bg); font-weight:800; font-size:12px; }
 .badge--good    { font-weight:700; margin-top:6px; color:var(--neon); }
@@ -3524,8 +3528,19 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
   .btn-save-row { flex-wrap: wrap; }
   .btn-save-row .btn { width: 100%; justify-content: center; }
 
-  /* PDF button en roster */
-  .btn-xs { padding: 3px 8px; font-size: 11px; }
+  /* PDF button en roster — mobile touch target WCAG 2.5.8 (min 24x24, target 44x44) */
+  .btn-xs {
+    padding: 8px 14px;
+    font-size: 12px;
+    min-height: 32px;
+    min-width: 32px;
+  }
+  .session-pill,
+  .chip,
+  .auth-demo__pill {
+    min-height: 36px;
+    min-width: 36px;
+  }
 }
 
 @media (max-width: 480px) {
