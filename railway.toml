@@ -2,8 +2,11 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "gunicorn app:server --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120"
+# IMPORTANTE: --preload + --workers 1 obligatorio para Dash
+# Sin --preload, los workers tienen self.registered_paths vacío
+# y Dash falla con "dash is not a registered library"
+startCommand = "gunicorn app:server --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 --preload"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
