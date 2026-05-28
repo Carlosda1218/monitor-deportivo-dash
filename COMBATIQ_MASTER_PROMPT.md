@@ -1543,6 +1543,140 @@ Medicion:
 - Chat despues sin cambios: HTTP 204, ~5.57 ms / 0 KB.
 - Envio vacio protegido: ~5.25 ms / ~2.215 KB.
 
+---
+
+## Actualizacion Operativa 2026-05-27 — DEMO ANTE INVERSOR
+
+### Resultado
+Presentacion exitosa ante profesor/inversor. Feedback:
+- "No dejes el proyecto"
+- "Es muy escalable"
+
+A partir de aqui el proyecto se desarrolla de forma autonoma (sin clase).
+Proxima demo objetivo: **Julio 2026 en Mexico**.
+
+### Que se mostro
+- App corriendo en puerto 8051 (Dash + Flask + SQLite local)
+- Roles demo: atleta TKD, coach TKD, admin
+- Analisis biomecanico shape_guard_v3 (keyframes limpios)
+- PDFs con metric_table profesional
+- IA contextual: generate_coaching_note, generate_alert_note, generate_wellbeing_message
+- Pipeline biomecanico async: MediaPipe -> YOLO -> render -> AI insight
+
+---
+
+## Actualizacion Operativa 2026-05-28 — POST-DEMO: PRODUCCION + DESIGN
+
+### Trabajo del dia (4 sprints completados, 1 en progreso)
+
+**Sprint Biomech-P2-A: `chamber_angle` TKD (commit 906bf92)**
+- Funcion `_detect_chamber_angles()` en `pose_analyzer.py`
+- Detecta kicks por minimos locales del angulo de rodilla
+- Ventanas: entry >= 140° (guardia), chamber <= 120° (recogida), exit >= 130° (extension)
+- Media movil 3 frames para reducir ruido de landmarks
+- Solo activo si `sport == "taekwondo"`
+- Insights semanticos: < 85° (explosiva), 85-100° (funcional), > 100° (telegrafica)
+- UI: bloque "Camara de pateo" con 3 tiles (solo TKD con kicks > 0)
+
+**Sprint Biomech-P2-B: velocidad de pateo m/s (commit b9aa361)**
+- Funcion `_estimate_kick_speed()` usa desplazamiento de tobillo (MediaPipe)
+- Escala: ancho de hombros mediana -> 0.43m referencia adulto WT
+- Percentil 90 como velocidad pico (robusto ante ruido)
+- Referencia Dollyo-chagi WT elite: >= 10 m/s
+- UI: 2a fila de tiles cuando hay kicks (velocidad izq/der + ref WT)
+
+**Sprint Scale-1: Produccion cloud (commits 25aeb0d, 102d885, 4e8f82f)**
+- DB: SQLite -> Supabase PostgreSQL via psycopg2 + `_PGCursor` adapter
+- `_USE_POSTGRES` activa con env var `SUPABASE_HOST`
+- `_PGCursor._adapt()` convierte automaticamente:
+  - `?` -> `%s`, `INTEGER PRIMARY KEY AUTOINCREMENT` -> `SERIAL`
+  - `BLOB` -> `BYTEA`, `INSERT OR IGNORE` -> `ON CONFLICT DO NOTHING`
+  - `datetime(col)` -> bare col, `coach_id=''` -> `IS NULL`, `PRAGMA` -> no-op
+- `supabase_schema.sql`: 25 tablas, 28 indices
+- 9 usuarios demo seeded en Supabase
+- Railway deploy: Procfile + railway.toml + /health endpoint
+- `requirements.txt` limpio: 35 paquetes (vs 110), `pywin32` con sys_platform marker
+- gunicorn start: `gunicorn app:server --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --preload`
+- **`--preload` es critico** sin esto Dash falla con "dash is not a registered library"
+
+**Sprint Brand-1: PowerSync -> CombatIQ (commit 7fbb646)**
+- `.powersync_opened` -> `.combatiq_opened`
+- `uirevision="powersync"` -> `"combatiq"`
+- `POWERSYNC_SECRET` env var: kept (legacy, ya configurada en Railway)
+- El "PowerSync" en producción venia del repo viejo CarlosTorres2006 que Railway tenia conectado.
+  Se resolvio cambiando Source a `Carlosda1218/monitor-deportivo-dash`.
+
+**Sprint Design-1: Identidad visual (commits e85487b, 38c3474, 47503ea, 042afc1)**
+- **CSS Foundations aplicadas (rama design-1 -> merged):**
+  - Inter font cargado desde Google Fonts
+  - 30+ tokens nuevos: text scale, easing, radius, dim colors, shadows
+  - Variantes card: `--glass`, `--elevated`, `--accent/warn/danger/success`
+  - Nav-link activo: gradiente + borde izquierdo teal con glow
+  - Botones: cubic-bezier easing + `:active` scale + shadows mejoradas
+  - h1-h6 + .caption + .text-muted utilities
+  - KPI tiles: hover glow + variantes amber/green/punch/neutral
+  - Sidebar brand: mark con teal glow + nombre con gradient text
+- **Figma file creado (CombatIQ — Design System v1):**
+  - File key: `EOf5tOJ5HLY7kWmCRWcOZ5`
+  - Plan Starter (3 paginas max): "Tokens", "Login + Atleta", "Coach + Biomec"
+  - **Login screen completada** (panel brand + form card)
+  - **Athlete Home completada** (sidebar + KPIs + wellness chart + AI note + sessions)
+  - **PENDIENTE:** Coach Home + Biomecanica screens
+  - **PENDIENTE:** Extraer tokens del Figma final -> aplicar a CSS Dash
+
+### Stack actual en produccion
+
+```
+URL:        https://web-production-7260b.up.railway.app
+Repo:       Carlosda1218/monitor-deportivo-dash (branch main)
+Deploy:     Railway (gregarious-vision project)
+DB:         Supabase PostgreSQL (eu-west-1, combatiq-prod, project ugocomczdjzouttobmyl)
+Connection: Session Pooler (IPv4) - host directo solo tiene IPv6
+```
+
+Credenciales DB en `.env` (NUNCA committear):
+- `SUPABASE_HOST=aws-0-eu-west-1.pooler.supabase.com`
+- `SUPABASE_USER=postgres.ugocomczdjzouttobmyl`
+- `SUPABASE_PASSWORD=QAygRx2W3Vx%ha%`
+
+### MCPs disponibles
+
+A traves de **claude.ai integrations** (ya conectados):
+- Figma, Context7, Canva, Google Calendar, Google Drive, Sentry, Slack (auth pendiente)
+
+Configurados localmente en `~/.claude/settings.json`:
+- GitHub PAT (ghp_*) + Figma API key (figd_*) + Context7
+
+### Decision arquitectonica V2 (hibrido)
+
+**Mantener Dash para salir al mercado (ahora):**
+- 80% del trabajo hecho, demo en julio en Mexico
+- Suficiente para primeros 200-500 clientes
+- Stack: Dash + Flask + Supabase + Railway
+
+**Construir React en paralelo (medio plazo):**
+- React + TypeScript + Tailwind + shadcn/ui + Tremor
+- Deploy: Vercel (frontend) + Railway (backend FastAPI)
+- pose_analyzer.py, ai_insights.py, sensores: **INTACTOS**
+- Migrar cuando haya 20-30 clientes pagando o mobile sea critico
+
+### Plan a Julio 2026 (Mexico demo)
+
+**Semanas 1-2 (ahora):**
+- Brand-1 ✅
+- Scale-1 ✅
+- Design-1 (en progreso) — terminar Coach Home + Biomec en Figma; extraer tokens
+
+**Semanas 3-4:**
+- Design-1 final: aplicar tokens del Figma a Dash CSS
+- Biomech-P3: indicador biomecanico para boxeo (guard_angle o punch_extension)
+- M-1: datetime.now() -> UTC en 5 instancias heatmap/streak
+
+**Semanas 5-6 (antes de julio):**
+- Polish-1: custom domain, PWA, mobile responsivo
+- Demo-1: script de demo pulido + cuentas demo perfectas
+- Perf-3: tiempo de carga < 3s en Railway
+
 Validacion:
 
 - `compileall pages\chat.py views\sensors_view.py`: OK.
