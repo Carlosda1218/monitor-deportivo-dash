@@ -4632,13 +4632,32 @@ class SignalsView:
             fid = row["id"]
 
             # Direct render (same logic as render_ecg) so the graph updates immediately
+            # Helper: si NO existe el CSV físico (caso demo / migración cloud), devolver
+            # las métricas almacenadas en ecg_metrics para que el atleta vea sus KPIs.
+            def _kpis_from_stored():
+                try:
+                    stored = db.get_latest_ecg_metrics_for_file(int(fid))
+                except Exception:
+                    stored = None
+                if stored and stored.get("bpm"):
+                    bpm_v   = float(stored.get("bpm")   or 0.0)
+                    sdnn_v  = float(stored.get("sdnn")  or 0.0)
+                    rmssd_v = float(stored.get("rmssd") or 0.0)
+                    return (
+                        fid,
+                        "Métricas guardadas (la señal no está disponible en este entorno).",
+                        empty_figure(message="Señal no disponible · usando métricas guardadas", height=320),
+                        kpi_grid_ecg(bpm_v, sdnn_v, rmssd_v),
+                    )
+                return fid, "ECG cargado de la sesión.", *_no_render
+
             try:
                 path = _ecg_data_path(row["filename"])
                 if not path:
-                    return fid, "ECG cargado de la sesión.", *_no_render
+                    return _kpis_from_stored()
                 t, x, fs = _cached_read_ecg_csv(path, fs_default=row.get("fs", 250))
                 if x is None or len(x) == 0:
-                    return fid, "ECG cargado de la sesión.", *_no_render
+                    return _kpis_from_stored()
                 xs, peaks = _cached_ecg_process(path, x, fs, 0, 0.6)
                 bpm, sdnn, rmssd = ecg_metrics_from_peaks(
                     peaks if peaks is not None else np.array([]), fs
@@ -4661,7 +4680,8 @@ class SignalsView:
                 kpis = kpi_grid_ecg(bpm, sdnn, rmssd)
                 return fid, "ECG cargado de la sesión.", fig, kpis
             except Exception:
-                return fid, "ECG cargado de la sesión.", *_no_render
+                # Cualquier error de lectura/proceso → fallback a métricas guardadas
+                return _kpis_from_stored()
 
         # ── Auto-load IMU stem from Combat Monitor session sidecar ─────────────
 
