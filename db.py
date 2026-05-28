@@ -107,11 +107,18 @@ class _PGCursor:
 
 # ── Conexión PostgreSQL ───────────────────────────────────────────────────────
 class _PGConn:
-    """Thin wrapper sobre psycopg2 connection que imita la interfaz sqlite3."""
+    """Thin wrapper sobre psycopg2 connection que imita la interfaz sqlite3.
+
+    Soporta `con.row_factory = sqlite3.Row` silenciosamente:
+      al setearlo, los siguientes cursor() devuelven DictRow compatible con
+      tanto `dict(row)` como `row["col"]` como `row[0]` (acceso por índice).
+    """
 
     def __init__(self):
         import psycopg2
-        self._con = psycopg2.connect(
+        # Bypass __setattr__ custom durante init
+        object.__setattr__(self, "_dict_mode", False)
+        con = psycopg2.connect(
             host=os.getenv("SUPABASE_HOST"),
             port=int(os.getenv("SUPABASE_PORT", "5432")),
             dbname=os.getenv("SUPABASE_DB", "postgres"),
@@ -120,9 +127,25 @@ class _PGConn:
             sslmode="require",
             connect_timeout=10,
         )
-        self._con.autocommit = False
+        con.autocommit = False
+        object.__setattr__(self, "_con", con)
+
+    def __setattr__(self, name, value):
+        # Atrapa row_factory = sqlite3.Row (compat layer)
+        if name == "row_factory":
+            try:
+                import sqlite3 as _sql
+                if value is _sql.Row:
+                    object.__setattr__(self, "_dict_mode", True)
+                    return
+            except Exception:
+                pass
+        object.__setattr__(self, name, value)
 
     def cursor(self):
+        if getattr(self, "_dict_mode", False):
+            from psycopg2.extras import DictCursor
+            return _PGCursor(self._con.cursor(cursor_factory=DictCursor))
         return _PGCursor(self._con.cursor())
 
     def execute(self, sql: str, params=None):
