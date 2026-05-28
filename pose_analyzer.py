@@ -21,7 +21,7 @@ from mediapipe.tasks.python.core import base_options as base_opts
 # Ruta al modelo (debe estar junto a este archivo)
 _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pose_landmarker_lite.task")
 _logger = logging.getLogger(__name__)
-_ANALYZER_VERSION = "shape_guard_v3_2026_05_27"
+_ANALYZER_VERSION = "shape_guard_v5_keyframe_torso_2026_05_27"
 try:
     _DUEL_KEYFRAME_CANDIDATES = max(6, int(os.getenv("COMBATIQ_DUEL_KEYFRAME_CANDIDATES", "48") or 48))
 except (TypeError, ValueError):
@@ -640,9 +640,26 @@ def _candidate_athlete_evidence(candidate: dict, target: str | None = None, *, a
         signal = max(torso, head * 1.8)
         other_signal = max(other_torso, other_head * 1.8)
         margin = signal - other_signal
-        has_helmet = head >= 0.052
+        has_helmet = head >= 0.052 and torso >= 0.025
         has_vest = torso >= 0.060 and ys < 0.075
-        tracked_hint = affinity >= 0.72 and signal >= 0.024 and margin >= -0.006
+        tracked_hint = affinity >= 0.72 and torso >= 0.020 and signal >= 0.024 and margin >= -0.006
+        head_without_torso = head >= 0.10 and torso < 0.025
+        torso_contradicts_head = (
+            head >= 0.10
+            and torso < 0.080
+            and other_torso >= 0.080
+            and other_torso > torso * 2.0
+        )
+        if head_without_torso or torso_contradicts_head:
+            return {
+                "enough": False,
+                "signal": round(signal, 4),
+                "margin": round(margin, 4),
+                "body_ok": bool(body_ok),
+                "referee_like": bool(referee_like),
+                "reason": "casco_sin_peto_coherente",
+                "other": other,
+            }
         enough = body_ok and not referee_like and (has_helmet or has_vest or tracked_hint)
         return {
             "enough": bool(enough),
@@ -654,7 +671,7 @@ def _candidate_athlete_evidence(candidate: dict, target: str | None = None, *, a
             "other": other,
         }
 
-    has_helmet = generic_head >= 0.052
+    has_helmet = generic_head >= 0.052 and generic_vest >= 0.025
     strong_vest = generic_vest >= 0.065 and ys < 0.075
     enough = body_ok and not referee_like and generic_signal >= 0.020 and (has_helmet or strong_vest)
     return {
@@ -866,6 +883,26 @@ def _select_duel_poses(candidates: list, tracks: dict) -> dict:
         vest_only.append(c)
     if vest_only:
         candidates = vest_only
+    else:
+        dummy = dict(max(candidates, key=lambda c: c.get("visibility", 0.0) + c.get("area", 0.0)))
+        dummy["selection_confidence"] = 0.0
+        dummy["rejection_reason"] = "sin_evidencia_atleta"
+        return {
+            "red": {"landmarks": None, "selected": dict(dummy)},
+            "blue": {"landmarks": None, "selected": dict(dummy)},
+        }
+
+    # Second guard: the legacy pre-filter can still admit "helmet-only" bodies.
+    # For duel analysis we require at least minimal torso/vest support so a
+    # referee or white-clad body is not selected from background head color.
+    strict_candidates = []
+    for c in candidates:
+        evidence = _candidate_athlete_evidence(c)
+        c["athlete_evidence"] = evidence.get("signal", 0.0)
+        if evidence.get("enough", False):
+            strict_candidates.append(c)
+    if strict_candidates:
+        candidates = strict_candidates
     else:
         dummy = dict(max(candidates, key=lambda c: c.get("visibility", 0.0) + c.get("area", 0.0)))
         dummy["selection_confidence"] = 0.0
@@ -2174,11 +2211,16 @@ def _analyze_video_duel(
                             float(duel_frame.get("red_confidence", 0.0) or 0.0),
                             float(duel_frame.get("blue_confidence", 0.0) or 0.0),
                         )
+                        min_keyframe_torso = min(
+                            float(frame_targets["red"]["record"].get("red_score", 0.0) or 0.0),
+                            float(frame_targets["blue"]["record"].get("blue_score", 0.0) or 0.0),
+                        )
                         frame_is_clean = (
                             min_frame_conf >= 0.62
                             and not red_bad
                             and not blue_bad
                             and max_body_overlap < 0.58
+                            and min_keyframe_torso >= 0.085
                             and min(
                                 float(duel_frame.get("red_edge_margin", 0.0) or 0.0),
                                 float(duel_frame.get("blue_edge_margin", 0.0) or 0.0),

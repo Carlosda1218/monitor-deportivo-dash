@@ -2448,3 +2448,42 @@ Validacion:
 - `test_app_flow.py`: `28/28`.
 - `test_s105_load.py --skip-video`: OK.
 - App reiniciada en `8051`, una sola instancia activa.
+
+## 2026-05-27 - Referee Lock V5 En Keyframes
+
+Contexto:
+
+- El usuario reporto que volvian a aparecer keyframes donde se metia el arbitro
+  o un cuerpo blanco como `Peto azul`, especialmente alrededor de `204.6s` y
+  `241.2s`.
+
+Causa raiz:
+
+- El selector todavia aceptaba candidatos "solo casco" si `head_blue_score` o
+  `head_red_score` era alto, aunque el torso/peto tuviera senal casi cero.
+- En videos WT con banners/fondo azul/rojo, la cabeza puede contaminarse con
+  color del entorno.
+
+Correccion:
+
+- Version nueva: `shape_guard_v5_keyframe_torso_2026_05_27`.
+- `_candidate_athlete_evidence()` ahora exige soporte minimo de torso/peto para
+  aceptar casco como evidencia.
+- El modo duelo re-filtra candidatos antes de seleccionar para eliminar
+  candidatos "helmet-only".
+- La galeria de keyframes es mas estricta que la serie numerica:
+  - ambos atletas deben tener torso/peto visible (`min_keyframe_torso >= 0.085`);
+  - esto evita mostrar frames visualmente indefendibles aunque algunos datos
+    pudieran ser utilizables.
+
+Validacion:
+
+- Frame `241.2s`: el falso azul queda rechazado como
+  `casco_sin_peto_coherente`.
+- Analisis completo con `videoplayback.mp4`:
+  - version: `shape_guard_v5_keyframe_torso_2026_05_27`;
+  - frames analizados: `901`;
+  - frames pareados: `42`;
+  - keyframes finales: `45.4s`, `135.4s`, `152.9s`;
+  - `204.6s` y `241.2s` ya no salen como keyframes.
+- App reiniciada en `8051`, una sola instancia activa, endpoint de version OK.

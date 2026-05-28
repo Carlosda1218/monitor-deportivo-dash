@@ -1021,3 +1021,16 @@ Regla operativa:
 - Se guarda referencia historica: deporte, objetivo, frames pareados, frames
   muestreados, nombre, archivo y version del analizador.
 - No guarda aun el reporte visual completo; para eso se usa PDF/export.
+
+## Estado Actualizado 2026-05-27 - Referee Lock V5
+
+- Version activa biomecanica: `shape_guard_v5_keyframe_torso_2026_05_27`.
+- Se cerro la ruta de falso positivo por "solo casco":
+  - casco/cabeza sin peto o torso minimo ya no sirve para aceptar atleta;
+  - duelo re-filtra candidatos antes de seleccionar;
+  - keyframes requieren peto visible en ambos atletas.
+- Keyframes actuales validados para el video WT:
+  - `45.4s`;
+  - `135.4s`;
+  - `152.9s`.
+- `204.6s` y `241.2s` quedan fuera de galeria por no ser defendibles visualmente.

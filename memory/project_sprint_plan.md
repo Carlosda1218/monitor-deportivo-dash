@@ -1154,3 +1154,10 @@ Fix adicional:
 - La sesion historica queda cerrada con nota `Combat Monitor`.
 - Pendiente futuro: persistir reporte biomecanico completo por hash/version si
   queremos abrirlo sin recalcular.
+
+Correccion urgente posterior:
+
+- `shape_guard_v5_keyframe_torso_2026_05_27` aplicado.
+- Cierre de falso positivo por candidatos solo-casco.
+- Keyframes de demo estabilizados en `45.4s`, `135.4s`, `152.9s`.
+- App reiniciada en `8051` con una sola instancia.

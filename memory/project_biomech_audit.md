@@ -429,3 +429,12 @@ Regla:
 - Pendiente futuro: tabla dedicada `video_analysis_reports` o cache persistente
   por `video_hash + analyzer_version + parametros` si queremos reabrir el
   analisis completo sin recalcular.
+
+## Auditoria 2026-05-27 - Referee Lock V5
+
+- Problema: el sistema aceptaba candidatos solo por color de cabeza/casco.
+- Fix: casco sin soporte minimo de peto/torso ya no cuenta como atleta rojo/azul.
+- La galeria exige peto visible en ambos atletas; la serie numerica puede ser
+  menos estricta, pero la imagen de demo no.
+- Version activa: `shape_guard_v5_keyframe_torso_2026_05_27`.
+- Keyframes validados para `videoplayback.mp4`: `45.4s`, `135.4s`, `152.9s`.

@@ -84,7 +84,7 @@ except Exception as e:
 _POSE_JOB_CACHE: dict[str, dict] = {}
 _POSE_JOB_TTL_SECONDS = 4 * 60 * 60
 _POSE_JOB_MAX_ITEMS = 8
-_POSE_ANALYSIS_VERSION = "shape_guard_v3_2026_05_27"
+_POSE_ANALYSIS_VERSION = "shape_guard_v5_keyframe_torso_2026_05_27"
 _REPLAY_FRAME_CACHE: dict[tuple, dict] = {}
 _REPLAY_FRAME_CACHE_TTL_SECONDS = 20 * 60
 _REPLAY_FRAME_CACHE_MAX_ITEMS = 64

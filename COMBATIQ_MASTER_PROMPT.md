@@ -1954,3 +1954,15 @@ Regla:
 
 - Para guardar el reporte completo usar PDF/export.
 - Para historial interno rapido usar `Guardar sesion de video`.
+
+### Actualizacion 2026-05-27 - Referee Lock V5
+
+- Nueva version: `shape_guard_v5_keyframe_torso_2026_05_27`.
+- Regla critica: no aceptar atleta rojo/azul basado solo en casco/cabeza.
+- Para keyframes de demo, ambos atletas deben tener peto/torso visible.
+- Keyframes validados del video WT: `45.4s`, `135.4s`, `152.9s`.
+
+Regla:
+
+- Galeria de demo > estricta que serie numerica.
+- Nunca mostrar como keyframe un atleta inferido solo por color de cabeza/fondo.

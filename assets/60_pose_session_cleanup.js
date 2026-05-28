@@ -3,7 +3,7 @@
    pero el navegador necesita retirar estas llaves para no restaurar un analisis
    anterior despues de logout. */
 (function () {
-  var CURRENT_ANALYZER_VERSION = "shape_guard_v3_2026_05_27";
+  var CURRENT_ANALYZER_VERSION = "shape_guard_v5_keyframe_torso_2026_05_27";
   var VERSION_KEY = "combatiq-pose-analyzer-version";
 
   function clearBiomechSessionState(clearSelectors) {
