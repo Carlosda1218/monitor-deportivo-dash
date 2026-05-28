@@ -5,29 +5,150 @@ from contextlib import contextmanager
 DB_PATH = os.path.join("data", "users.db")
 _WAL_CONFIGURED_PATHS = set()
 
+# ── Detección de backend ──────────────────────────────────────────────────────
+# Si las variables SUPABASE_* están presentes usamos PostgreSQL (psycopg2).
+# En caso contrario, SQLite local (desarrollo / tests).
+_SUPABASE_HOST = os.getenv("SUPABASE_HOST")
+_USE_POSTGRES   = bool(_SUPABASE_HOST)
+
+
+# ── Cursor wrapper ────────────────────────────────────────────────────────────
+# Convierte placeholders SQLite (?) a PostgreSQL (%s) y expone lastrowid
+# usando SELECT lastval() para mantener compatibilidad con el código existente.
+class _PGCursor:
+    def __init__(self, cur):
+        self._c = cur
+
+    @staticmethod
+    def _adapt(sql: str) -> str:
+        import re
+        s = sql.upper()
+
+        # INSERT OR IGNORE → INSERT INTO ... ON CONFLICT DO NOTHING
+        if 'INSERT OR IGNORE' in s:
+            sql = re.sub(r'\bINSERT\s+OR\s+IGNORE\s+INTO\b', 'INSERT INTO',
+                         sql, flags=re.IGNORECASE)
+            sql = sql.rstrip() + ' ON CONFLICT DO NOTHING'
+            return sql.replace("?", "%s")
+
+        # INSERT OR REPLACE INTO schema_migrations → upsert on (version)
+        if 'INSERT OR REPLACE' in s and 'SCHEMA_MIGRATIONS' in s:
+            sql = re.sub(r'\bINSERT\s+OR\s+REPLACE\s+INTO\b', 'INSERT INTO',
+                         sql, flags=re.IGNORECASE)
+            sql = sql.rstrip() + ' ON CONFLICT (version) DO UPDATE SET applied_at = EXCLUDED.applied_at'
+            return sql.replace("?", "%s")
+
+        # INSERT OR REPLACE INTO team_members → upsert on (team_id, athlete_id)
+        if 'INSERT OR REPLACE' in s and 'TEAM_MEMBERS' in s:
+            sql = re.sub(r'\bINSERT\s+OR\s+REPLACE\s+INTO\b', 'INSERT INTO',
+                         sql, flags=re.IGNORECASE)
+            sql = sql.rstrip() + ' ON CONFLICT (team_id, athlete_id) DO UPDATE SET role_label = EXCLUDED.role_label, created_at = EXCLUDED.created_at'
+            return sql.replace("?", "%s")
+
+        # Remaining INSERT OR REPLACE → plain INSERT (constraint error = correct behavior)
+        if 'INSERT OR REPLACE' in s:
+            sql = re.sub(r'\bINSERT\s+OR\s+REPLACE\s+INTO\b', 'INSERT INTO',
+                         sql, flags=re.IGNORECASE)
+
+        # ── DDL: SQLite → PostgreSQL syntax ──────────────────────────────────
+        # AUTOINCREMENT → SERIAL (must replace entire "INTEGER PRIMARY KEY AUTOINCREMENT")
+        sql = re.sub(r'\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b',
+                     'SERIAL PRIMARY KEY', sql, flags=re.IGNORECASE)
+        # BLOB → BYTEA (password hashes)
+        sql = re.sub(r'\bBLOB\b', 'BYTEA', sql, flags=re.IGNORECASE)
+        # SQLite datetime defaults → PostgreSQL
+        sql = re.sub(r"DEFAULT\s+\(datetime\('now'\)\)", "DEFAULT (NOW()::TEXT)",
+                     sql, flags=re.IGNORECASE)
+        sql = re.sub(r"DEFAULT\s+\(strftime\('[^']+','now'\)\)",
+                     "DEFAULT (NOW()::TEXT)", sql, flags=re.IGNORECASE)
+        # PRAGMA statements → no-op comment (PostgreSQL ignores them)
+        if re.match(r'^\s*PRAGMA\b', sql, re.IGNORECASE):
+            return "SELECT 1 -- pragma skipped"
+
+        # SQLite datetime() wrapper → bare column/value (ISO strings sort correctly in PG)
+        # datetime(col) → col  |  datetime(?) → ?
+        sql = re.sub(r'\bdatetime\((\?|[a-zA-Z_][\w.]*)\)', r'\1', sql, flags=re.IGNORECASE)
+
+        # SQLite empty-string integer comparisons → IS NULL
+        sql = re.sub(r"(\w+)\s*=\s*''", r"\1 IS NULL", sql)
+        sql = re.sub(r'(\w+)\s*=\s*""', r"\1 IS NULL", sql)
+
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params=None):
+        sql = self._adapt(sql)
+        self._c.execute(sql, params) if params is not None else self._c.execute(sql)
+        return self
+
+    def executemany(self, sql: str, seq):
+        sql = sql.replace("?", "%s")
+        self._c.executemany(sql, seq)
+        return self
+
+    def fetchone(self):  return self._c.fetchone()
+    def fetchall(self):  return self._c.fetchall()
+
+    @property
+    def description(self): return self._c.description
+    @property
+    def rowcount(self):    return self._c.rowcount
+
+    @property
+    def lastrowid(self):
+        try:
+            self._c.execute("SELECT lastval()")
+            row = self._c.fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def __iter__(self): return iter(self._c)
+
+
+# ── Conexión PostgreSQL ───────────────────────────────────────────────────────
+class _PGConn:
+    """Thin wrapper sobre psycopg2 connection que imita la interfaz sqlite3."""
+
+    def __init__(self):
+        import psycopg2
+        self._con = psycopg2.connect(
+            host=os.getenv("SUPABASE_HOST"),
+            port=int(os.getenv("SUPABASE_PORT", "5432")),
+            dbname=os.getenv("SUPABASE_DB", "postgres"),
+            user=os.getenv("SUPABASE_USER", "postgres"),
+            password=os.getenv("SUPABASE_PASSWORD", ""),
+            sslmode="require",
+            connect_timeout=10,
+        )
+        self._con.autocommit = False
+
+    def cursor(self):
+        return _PGCursor(self._con.cursor())
+
+    def execute(self, sql: str, params=None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):   self._con.commit()
+    def rollback(self): self._con.rollback()
+    def close(self):    self._con.close()
+
 
 # ======================
 # Conexión / utilidades
 # ======================
 
 def _conn():
-    """
-    Devuelve una conexión SQLite con:
-    - carpeta data/ creada si no existe
-    - timeout ampliado para reducir "database is locked"
-    - check_same_thread=False para uso con Dash
-    - PRAGMAs para mejorar concurrencia (WAL) en despliegue web
-    """
+    if _USE_POSTGRES:
+        return _PGConn()
+    # SQLite local
     os.makedirs("data", exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
-
     try:
         con.execute("PRAGMA foreign_keys = ON;")
     except Exception:
         pass
-
-    # Concurrencia más estable. journal_mode=WAL puede tomar locks, así que se
-    # configura una vez por ruta/proceso en lugar de repetirlo en cada query.
     try:
         db_key = os.path.abspath(DB_PATH)
         if db_key not in _WAL_CONFIGURED_PATHS:
@@ -40,24 +161,24 @@ def _conn():
     except Exception:
         pass
     try:
-        con.execute("PRAGMA busy_timeout = 5000;")  # 5s
+        con.execute("PRAGMA busy_timeout = 5000;")
     except Exception:
         pass
-
     return con
 
 
 @contextmanager
 def _get_conn():
-    """
-    Context manager que garantiza:
-    - commit automático si todo va bien
-    - cierre de la conexión SIEMPRE (también si hay excepción)
-    """
     con = _conn()
     try:
         yield con
         con.commit()
+    except Exception:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         try:
             con.close()
@@ -71,12 +192,20 @@ def _dicts(cur):
         yield {k: v for k, v in zip(cols, row)}
 
 
-def _has_column(con: sqlite3.Connection, table: str, column: str) -> bool:
+def _has_column(con, table: str, column: str) -> bool:
     try:
         cur = con.cursor()
-        cur.execute(f"PRAGMA table_info({table})")
-        cols = [r[1] for r in cur.fetchall()]  # (cid, name, type, notnull, dflt_value, pk)
-        return column in cols
+        if _USE_POSTGRES:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = %s AND column_name = %s",
+                (table, column),
+            )
+            return cur.fetchone() is not None
+        else:
+            cur.execute(f"PRAGMA table_info({table})")
+            cols = [r[1] for r in cur.fetchall()]
+            return column in cols
     except Exception:
         return False
 
@@ -1924,9 +2053,9 @@ def register_device(user_id: int, sensor_code: str, device_id: str,
                VALUES (?,?,?,?,?,?,?)
                ON CONFLICT(user_id, device_id) DO UPDATE SET
                  sensor_code      = excluded.sensor_code,
-                 device_label     = COALESCE(excluded.device_label, device_label),
+                 device_label     = COALESCE(excluded.device_label, sensor_devices.device_label),
                  status           = 'paired',
-                 firmware_version = COALESCE(excluded.firmware_version, firmware_version)
+                 firmware_version = COALESCE(excluded.firmware_version, sensor_devices.firmware_version)
             """,
             (user_id, sensor_code, device_id, device_label, "paired", firmware_version, now),
         )
