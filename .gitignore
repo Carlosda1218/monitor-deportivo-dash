@@ -8,4 +8,6 @@ __pycache__/
 .env
 data/uploads/
 data/uploads_legacy/
+data/uploads_quarantine_*/
 assets/uploads/
+*.db
