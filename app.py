@@ -8086,7 +8086,7 @@ def _env_flag(name: str, default: str = "0") -> bool:
 
 AUTO_OPEN = _env_flag("POWERSYNC_AUTO_OPEN", "1")
 COMBATIQ_DEBUG = _env_flag("COMBATIQ_DEBUG", "0")
-_OPEN_SENTINEL = os.path.join(os.path.expanduser("~"), ".powersync_opened")
+_OPEN_SENTINEL = os.path.join(os.path.expanduser("~"), ".combatiq_opened")
 
 
 def _open_browser_once(url):

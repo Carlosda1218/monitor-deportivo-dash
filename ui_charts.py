@@ -88,7 +88,7 @@ def apply_chart_style(
         ),
     )
 
-    _safe(fig.update_layout, uirevision="powersync")
+    _safe(fig.update_layout, uirevision="combatiq")
 
     if x_title is not None:
         _safe(fig.update_xaxes, title_text=x_title)
