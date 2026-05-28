@@ -347,22 +347,43 @@ input[type="checkbox"], input[type="radio"]{ accent-color: var(--neon); }
 .kpis{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; }
 .kpi{
   position:relative; overflow:hidden;
-  background: linear-gradient(180deg, rgba(32,44,58,.88), rgba(22,31,41,.88));
-  border:1px solid #31445f; border-radius:16px; padding:14px 16px;
+  background: linear-gradient(160deg, rgba(34,47,63,.92) 0%, rgba(20,28,39,.95) 100%);
+  border:1px solid rgba(49,68,95,.60);
+  border-radius:var(--r-lg); padding:14px 16px;
+  transition: border-color var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out);
 }
+.kpi:hover{
+  border-color:rgba(47,183,196,.28);
+  box-shadow:0 0 0 1px rgba(47,183,196,.10), var(--shadow-card);
+}
+/* Shimmer top */
 .kpi::before{
-  content:""; position:absolute; inset:0; opacity:.6; pointer-events:none;
+  content:""; position:absolute; inset:0; opacity:.7; pointer-events:none;
   background:
-    linear-gradient(90deg, rgba(47,183,196,.10), transparent 30%, transparent 70%, rgba(47,183,196,.10)),
-    linear-gradient(180deg, rgba(255,255,255,.02), transparent);
-  mask-image: radial-gradient(120% 60% at 50% 0%, #000, transparent 70%);
+    linear-gradient(135deg, rgba(47,183,196,.08) 0%, transparent 50%),
+    linear-gradient(180deg, rgba(255,255,255,.03) 0%, transparent 40%);
 }
-.kpi-label{ color:var(--muted); font-size:12px; }
+.kpi-label{
+  color:var(--muted);
+  font-size:var(--text-xs); font-weight:var(--fw-semibold);
+  letter-spacing:.4px; text-transform:uppercase;
+  margin-bottom:4px;
+}
 .kpi-value{
-  font-size:28px; font-weight:900;
-  color:var(--neon); text-shadow: var(--glow);
+  font-size:26px; font-weight:var(--fw-black); line-height:1.1;
+  color:var(--neon); text-shadow:var(--glow);
+  letter-spacing:-.5px;
 }
-.kpi-sub{ font-size:12px; color:#b9c4cf; }
+.kpi-sub{
+  font-size:var(--text-xs); color:var(--muted);
+  margin-top:3px;
+}
+/* Variantes semánticas de KPI */
+.kpi--amber .kpi-value{ color:var(--amber); text-shadow:0 0 10px rgba(240,168,50,.20); }
+.kpi--green .kpi-value{ color:var(--green); text-shadow:0 0 10px rgba(39,201,143,.20); }
+.kpi--punch .kpi-value{ color:var(--punch); text-shadow:0 0 10px rgba(228,90,90,.20); }
+.kpi--neutral .kpi-value{ color:var(--ink); text-shadow:none; }
 
 /* Línea mini-ECG para KPIs */
 .kpi-ecg-line{
