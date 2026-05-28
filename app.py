@@ -140,7 +140,6 @@ def flask_logout():
     session.clear()
     return redirect("/login?logged_out=1")
 
-
 def _start_demo_session(kind: str):
     """Entrada demo robusta por HTTP: no depende de callbacks de Dash."""
     if kind == "coach-tkd":

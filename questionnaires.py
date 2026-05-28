@@ -145,7 +145,6 @@ def score_breakdown(ans: Dict, sport: str | None = None, competition: bool = Fal
 
     total = 0.70 * positive_avg + 0.30 * (100.0 - risk_avg)
     total = max(0.0, min(100.0, total))
-
     return {
         "score": float(total),
         "positive_avg": float(positive_avg),
