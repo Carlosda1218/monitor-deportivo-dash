@@ -930,7 +930,15 @@ def _hash_pw(pw: str) -> bytes:
 
 
 def _check_pw(pw: str, hashed) -> bool:
-    if isinstance(hashed, str):
+    # PostgreSQL BYTEA llega como memoryview; SQLite BLOB llega como bytes.
+    # Normalizar a bytes ANTES de pasar a bcrypt o startswith.
+    if hashed is None:
+        return False
+    if isinstance(hashed, memoryview):
+        hashed = bytes(hashed)
+    elif isinstance(hashed, bytearray):
+        hashed = bytes(hashed)
+    elif isinstance(hashed, str):
         hashed = hashed.encode("utf-8")
     # Hashes PBKDF2 (fallback moderno)
     if hashed.startswith(b"pbkdf2:"):

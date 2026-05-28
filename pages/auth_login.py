@@ -35,19 +35,21 @@ def _rate_clear(ip: str) -> None:
     _login_attempts.pop(ip, None)
 
 def _check_pw(plain: str, stored):
+    # PostgreSQL BYTEA llega como memoryview; SQLite BLOB llega como bytes
+    if stored is None:
+        return False
+    if isinstance(stored, memoryview):
+        stored = bytes(stored)
+    elif isinstance(stored, bytearray):
+        stored = bytes(stored)
+    elif isinstance(stored, str):
+        stored = stored.encode("utf-8")
     try:
         import bcrypt
-        if isinstance(stored, str):
-            stored = stored.encode("utf-8")
         return bcrypt.checkpw((plain or "").encode("utf-8"), stored)
     except Exception:
         # Fallback: PBKDF2 actual de db.py y SHA256 legacy.
-        if stored is None:
-            return False
-        if isinstance(stored, (bytes, bytearray)):
-            stored_bytes = bytes(stored)
-        else:
-            stored_bytes = str(stored).encode("utf-8", "ignore")
+        stored_bytes = stored if isinstance(stored, bytes) else str(stored).encode("utf-8", "ignore")
 
         if stored_bytes.startswith(b"pbkdf2:"):
             try:
