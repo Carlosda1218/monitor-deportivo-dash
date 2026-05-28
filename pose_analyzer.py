@@ -1318,9 +1318,11 @@ def _detect_chamber_angles(frames_data: list, fps: float) -> dict:
     - Posterior: algún frame siguiente (ventana 10 frames) con rodilla >= 130° (extensión / retorno)
 
     Retorna dict con chamber_l / chamber_r, cada uno con:
-      min   – ángulo mínimo de cámara detectado (°), None si no hubo kicks
-      avg   – promedio de cámaras detectadas (°)
-      count – número de eventos de pateo detectados
+      min        – ángulo mínimo de cámara detectado (°), None si no hubo kicks
+      avg        – promedio de cámaras detectadas (°)
+      count      – número de eventos de pateo detectados
+      windows    – lista de (frame_start, frame_chamber, frame_end) para cada kick
+                   usado por _estimate_kick_speed para calcular velocidad
     """
     ENTRY_MIN   = 140.0   # rodilla en guardia: >= este valor antes del kick
     CHAMBER_MAX = 120.0   # cámara apretada: rodilla <= este valor
@@ -1332,18 +1334,25 @@ def _detect_chamber_angles(frames_data: list, fps: float) -> dict:
     result = {}
     for side in ("l", "r"):
         key = f"knee_{side}"
-        series = [f[key] for f in frames_data if isinstance(f.get(key), (int, float))]
-        if len(series) < 6:
-            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0}
+        # Filtrar solo frames que tienen dato de rodilla + conservar índice original
+        valid = [(idx, f[key], f.get("frame", idx))
+                 for idx, f in enumerate(frames_data)
+                 if isinstance(f.get(key), (int, float))]
+        if len(valid) < 6:
+            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0, "windows": []}
             continue
+
+        series_angles = [v[1] for v in valid]
+        series_frames  = [v[2] for v in valid]   # número de frame de video real
 
         # Media móvil de 3 frames para reducir ruido de landmarks
         smoothed = []
-        for i in range(len(series)):
-            window = series[max(0, i - 1): i + 2]
+        for i in range(len(series_angles)):
+            window = series_angles[max(0, i - 1): i + 2]
             smoothed.append(sum(window) / len(window))
 
         chambers = []
+        windows  = []
         i = 1
         while i < len(smoothed) - 1:
             # Mínimo local
@@ -1355,18 +1364,109 @@ def _detect_chamber_angles(frames_data: list, fps: float) -> dict:
                     exit_ok  = any(v >= EXIT_MIN  for v in post_slice)
                     if entry_ok and exit_ok:
                         chambers.append(round(smoothed[i], 1))
+                        # Ventana de frames para cálculo de velocidad:
+                        # desde inicio de cámara (WINDOW_PRE atrás) hasta fin de extensión
+                        win_s = series_frames[max(0, i - WINDOW_PRE)]
+                        win_c = series_frames[i]                        # frame del mínimo (cámara)
+                        win_e = series_frames[min(len(series_frames) - 1, i + WINDOW_POST)]
+                        windows.append((win_s, win_c, win_e))
                         i += MIN_SKIP
                         continue
             i += 1
 
         if chambers:
             result[f"chamber_{side}"] = {
-                "min":   round(min(chambers), 1),
-                "avg":   round(sum(chambers) / len(chambers), 1),
-                "count": len(chambers),
+                "min":     round(min(chambers), 1),
+                "avg":     round(sum(chambers) / len(chambers), 1),
+                "count":   len(chambers),
+                "windows": windows,
             }
         else:
-            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0}
+            result[f"chamber_{side}"] = {"min": None, "avg": None, "count": 0, "windows": []}
+
+    return result
+
+
+def _estimate_kick_speed(frames_data: list, fps: float, chamber_data: dict) -> dict:
+    """
+    Estima la velocidad de pateo en m/s usando desplazamiento de tobillo (MediaPipe landmarks).
+
+    Método: para cada ventana de kick detectada por _detect_chamber_angles,
+    calcula el desplazamiento px/frame del tobillo correspondiente y lo convierte
+    a m/s usando el ancho de hombros como referencia de escala corporal.
+
+    Referencia de escala: ancho de hombros adulto competidor WT ≈ 0.43 m.
+    El percentil 90 de velocidades en la ventana = velocidad pico del kick.
+
+    Retorna dict con kick_speed_l / kick_speed_r, cada uno con:
+      max_ms  – velocidad pico estimada en m/s, None si no hay datos
+      avg_ms  – promedio de picos de cada kick
+    """
+    SHOULDER_REF_M = 0.43   # ancho de hombros referencia (m)
+    MIN_SH_PX      = 20.0   # descarta frames con hombros muy estrechos (oclusión)
+
+    # Índice rápido: número de frame → entrada de frames_data
+    frame_lookup: dict = {f["frame"]: f for f in frames_data if "frame" in f}
+
+    # Escala global: mediana del ancho de hombros en todos los frames válidos
+    sh_vals = [f["shoulder_w_px"] for f in frames_data
+               if isinstance(f.get("shoulder_w_px"), (int, float)) and f["shoulder_w_px"] >= MIN_SH_PX]
+    if not sh_vals:
+        return {
+            "kick_speed_l": {"max_ms": None, "avg_ms": None},
+            "kick_speed_r": {"max_ms": None, "avg_ms": None},
+        }
+    sh_vals_sorted = sorted(sh_vals)
+    median_sh_px   = sh_vals_sorted[len(sh_vals_sorted) // 2]
+    scale_m_per_px = SHOULDER_REF_M / median_sh_px
+
+    result = {}
+    for side in ("l", "r"):
+        ch      = chamber_data.get(f"chamber_{side}") or {}
+        windows = ch.get("windows") or []
+        if not windows:
+            result[f"kick_speed_{side}"] = {"max_ms": None, "avg_ms": None}
+            continue
+
+        ankle_key = f"ankle_{side}_px"
+        kick_peaks = []
+
+        for win_s, _win_c, win_e in windows:
+            # Recoger posiciones del tobillo en orden de frame dentro de la ventana
+            win_frames = sorted(
+                [f for f in frames_data
+                 if win_s <= f.get("frame", -1) <= win_e and f.get(ankle_key) is not None],
+                key=lambda f: f["frame"],
+            )
+            if len(win_frames) < 3:
+                continue
+
+            # Calcular velocidad frame a frame dentro de la ventana
+            frame_speeds = []
+            for j in range(1, len(win_frames)):
+                f0, f1 = win_frames[j - 1], win_frames[j]
+                pos0, pos1 = f0[ankle_key], f1[ankle_key]
+                dt = f1["t"] - f0["t"]
+                if dt <= 0 or pos0 is None or pos1 is None:
+                    continue
+                dist_px = ((pos1[0] - pos0[0]) ** 2 + (pos1[1] - pos0[1]) ** 2) ** 0.5
+                frame_speeds.append(dist_px * scale_m_per_px / dt)
+
+            if not frame_speeds:
+                continue
+
+            # Percentil 90 como velocidad pico del kick (robustez ante ruido de landmark)
+            frame_speeds.sort()
+            p90_idx  = max(0, int(len(frame_speeds) * 0.90) - 1)
+            kick_peaks.append(frame_speeds[p90_idx])
+
+        if kick_peaks:
+            result[f"kick_speed_{side}"] = {
+                "max_ms": round(max(kick_peaks), 2),
+                "avg_ms": round(sum(kick_peaks) / len(kick_peaks), 2),
+            }
+        else:
+            result[f"kick_speed_{side}"] = {"max_ms": None, "avg_ms": None}
 
     return result
 
@@ -1491,6 +1591,39 @@ def _build_biomech_reading(summary: dict, frames_data: list, sport: str | None =
                             "(> 100°), lo que reduce velocidad y anticipa el movimiento al rival."
                         ),
                     })
+        # ── Velocidad de pateo insight ────────────────────────────────────────
+        _sp_l = summary.get("kick_speed_l") or {}
+        _sp_r = summary.get("kick_speed_r") or {}
+        _sp_vals = [v for v in [_sp_l.get("max_ms"), _sp_r.get("max_ms")] if v is not None]
+        if _sp_vals:
+            best_speed = max(_sp_vals)
+            if best_speed >= 10.0:
+                insights.append({
+                    "level": "ok",
+                    "title": f"Velocidad de pateo alta ({best_speed} m/s)",
+                    "text": (
+                        "Velocidad de tobillo estimada en fase de extensión. "
+                        "Referencia WT competición: > 10 m/s considerado potente para Dollyo-chagi."
+                    ),
+                })
+            elif best_speed >= 6.0:
+                insights.append({
+                    "level": "warn",
+                    "title": f"Velocidad de pateo moderada ({best_speed} m/s)",
+                    "text": (
+                        "La velocidad de extensión está en rango funcional pero por debajo de los "
+                        "10 m/s de referencia. Combinar con trabajo de cámara y explosividad de cadera."
+                    ),
+                })
+            else:
+                insights.append({
+                    "level": "alert",
+                    "title": f"Velocidad de pateo baja ({best_speed} m/s)",
+                    "text": (
+                        "Velocidad estimada baja. Puede ser por video lento, encuadre lejano o "
+                        "que el atleta no pateó con máxima intensidad. Revisar contexto antes de concluir."
+                    ),
+                })
     elif sport_key == "boxeo":
         if elbow_avg > 150:
             insights.append({
@@ -1562,16 +1695,22 @@ def _build_biomech_reading(summary: dict, frames_data: list, sport: str | None =
         "shoulder_asym": shoulder_asym,
         **{f"rom_{k}": v for k, v in rom.items()},
     }
-    # Exponer métricas de chamber para TKD (usadas en UI y PDF)
+    # Exponer métricas de chamber y velocidad para TKD (usadas en UI y PDF)
     if sport_key == "taekwondo":
         _ch_l = summary.get("chamber_l") or {}
         _ch_r = summary.get("chamber_r") or {}
+        _sp_l = summary.get("kick_speed_l") or {}
+        _sp_r = summary.get("kick_speed_r") or {}
         metrics["chamber_min_l"]  = _ch_l.get("min")
         metrics["chamber_min_r"]  = _ch_r.get("min")
         metrics["chamber_avg_l"]  = _ch_l.get("avg")
         metrics["chamber_avg_r"]  = _ch_r.get("avg")
         metrics["kick_count_l"]   = _ch_l.get("count", 0)
         metrics["kick_count_r"]   = _ch_r.get("count", 0)
+        metrics["kick_speed_max_l"] = _sp_l.get("max_ms")
+        metrics["kick_speed_max_r"] = _sp_r.get("max_ms")
+        metrics["kick_speed_avg_l"] = _sp_l.get("avg_ms")
+        metrics["kick_speed_avg_r"] = _sp_r.get("avg_ms")
 
     return {
         "sport": sport_key,
@@ -2423,12 +2562,16 @@ def _analyze_video_duel(
         candidates_seen, misses["blue"], confidences["blue"], continuity["blue"],
         track_rejections["blue"], rejection_reasons["blue"],
     )
-    # TKD-only: ángulo de cámara de pateo para cada peleador
+    # TKD-only: ángulo de cámara y velocidad de pateo para cada peleador
     if _sport_key(sport) == "taekwondo":
         if target_frames["red"]:
-            red_summary.update(_detect_chamber_angles(target_frames["red"], fps))
+            _red_ch = _detect_chamber_angles(target_frames["red"], fps)
+            red_summary.update(_red_ch)
+            red_summary.update(_estimate_kick_speed(target_frames["red"], fps, _red_ch))
         if target_frames["blue"]:
-            blue_summary.update(_detect_chamber_angles(target_frames["blue"], fps))
+            _blue_ch = _detect_chamber_angles(target_frames["blue"], fps)
+            blue_summary.update(_blue_ch)
+            blue_summary.update(_estimate_kick_speed(target_frames["blue"], fps, _blue_ch))
     red_target = _target_info_from_summary("red", red_summary, processed_counts["red"], candidates_seen, misses["red"], tracks["red"])
     blue_target = _target_info_from_summary("blue", blue_summary, processed_counts["blue"], candidates_seen, misses["blue"], tracks["blue"])
     red_biomech = _build_biomech_reading(red_summary, target_frames["red"], sport=sport)
@@ -2720,6 +2863,13 @@ def analyze_video(
                         pose_quality = min(pose_quality, max(0.25, identity_quality))
                     angs = _extract_angles(lms, w, h, validity=validity)
 
+                    # Posiciones de tobillo y ancho de hombros (px) — para velocidad de pateo TKD
+                    _ank_l  = _lm_xy(lms, "L_ankle", w, h)
+                    _ank_r  = _lm_xy(lms, "R_ankle", w, h)
+                    _sh_l   = _lm_xy(lms, "L_shoulder", w, h)
+                    _sh_r   = _lm_xy(lms, "R_shoulder", w, h)
+                    _sh_w   = round(abs(_sh_r[0] - _sh_l[0]), 1) if (_sh_l and _sh_r) else None
+
                     frames_data.append({
                         "t":          round(frame_idx / fps, 2),
                         "frame":      frame_idx,
@@ -2736,6 +2886,9 @@ def analyze_video(
                         "identity_warnings": identity_notes,
                         "body_overlap": round(float(selected.get("body_overlap", 0.0) or 0.0), 3),
                         "edge_margin": edge_margin,
+                        "ankle_l_px": _ank_l,
+                        "ankle_r_px": _ank_r,
+                        "shoulder_w_px": _sh_w,
                         **angs,
                     })
 
@@ -2812,9 +2965,11 @@ def analyze_video(
         for _note in (_f.get("landmark_warnings") or []):
             _wb[_note] = _wb.get(_note, 0) + 1
     summary["warning_breakdown"] = _wb
-    # ── TKD-only: ángulo de cámara de pateo ──────────────────────────────────
+    # ── TKD-only: ángulo de cámara y velocidad de pateo ─────────────────────
     if _sport_key(sport) == "taekwondo" and frames_data:
-        summary.update(_detect_chamber_angles(frames_data, fps))
+        _chamber_data = _detect_chamber_angles(frames_data, fps)
+        summary.update(_chamber_data)
+        summary.update(_estimate_kick_speed(frames_data, fps, _chamber_data))
     _raw_confidence = round(float(np.mean(confidences)), 3) if confidences else 0.0
     _coverage = round(processed / max(sampled, 1), 3)
     _visible_confidence = round(_raw_confidence * (0.45 + 0.55 * _coverage), 3)

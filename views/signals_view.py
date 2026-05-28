@@ -7051,17 +7051,34 @@ class SignalsView:
                             _metric_card(
                                 "Cámara pierna izq",
                                 f"{metrics.get('chamber_min_l') or '--'}°",
-                                f"{metrics.get('kick_count_l') or 0} kick(s) detectados",
+                                f"{metrics.get('kick_count_l') or 0} kick(s)",
                             ),
                             _metric_card(
                                 "Cámara pierna der",
                                 f"{metrics.get('chamber_min_r') or '--'}°",
-                                f"{metrics.get('kick_count_r') or 0} kick(s) detectados",
+                                f"{metrics.get('kick_count_r') or 0} kick(s)",
                             ),
                             _metric_card(
                                 "Total kicks",
                                 str((metrics.get('kick_count_l') or 0) + (metrics.get('kick_count_r') or 0)),
-                                "Eventos de pateo detectados",
+                                "Eventos detectados",
+                            ),
+                        ]),
+                        html.Div(className="kpis session-kpis", style={"marginTop": "8px"}, children=[
+                            _metric_card(
+                                "Velocidad pico izq",
+                                f"{metrics.get('kick_speed_max_l') or '--'} m/s",
+                                "Tobillo en extensión",
+                            ),
+                            _metric_card(
+                                "Velocidad pico der",
+                                f"{metrics.get('kick_speed_max_r') or '--'} m/s",
+                                "Tobillo en extensión",
+                            ),
+                            _metric_card(
+                                "Ref. WT élite",
+                                "≥ 10 m/s",
+                                "Dollyo-chagi competición",
                             ),
                         ]),
                     ] if biomech.get("sport") == "taekwondo" and
@@ -7629,14 +7646,18 @@ class SignalsView:
                 ]
                 # Añadir métricas de cámara de pateo solo en TKD
                 if biomech.get("sport") == "taekwondo":
-                    _ch_l = metrics.get("chamber_min_l")
-                    _ch_r = metrics.get("chamber_min_r")
+                    _ch_l  = metrics.get("chamber_min_l")
+                    _ch_r  = metrics.get("chamber_min_r")
+                    _sp_l  = metrics.get("kick_speed_max_l")
+                    _sp_r  = metrics.get("kick_speed_max_r")
                     _kicks = (metrics.get("kick_count_l") or 0) + (metrics.get("kick_count_r") or 0)
                     if _kicks > 0:
                         _pdf_pose_rows += [
                             {"label": "Cámara pierna izq (mín)", "value": f"{_ch_l:.1f}" if _ch_l is not None else "--", "unit": "grados"},
                             {"label": "Cámara pierna der (mín)", "value": f"{_ch_r:.1f}" if _ch_r is not None else "--", "unit": "grados"},
-                            {"label": "Kicks detectados", "value": int(_kicks), "unit": "eventos"},
+                            {"label": "Velocidad pico izq",  "value": f"{_sp_l:.2f}" if _sp_l is not None else "--", "unit": "m/s"},
+                            {"label": "Velocidad pico der",  "value": f"{_sp_r:.2f}" if _sp_r is not None else "--", "unit": "m/s"},
+                            {"label": "Kicks detectados",    "value": int(_kicks), "unit": "eventos"},
                         ]
                 pdf.metric_table(_pdf_pose_rows)
 
