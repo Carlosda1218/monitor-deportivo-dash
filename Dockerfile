@@ -6,11 +6,14 @@ FROM python:3.12-slim-bookworm
 
 # Dependencias del sistema requeridas por:
 # - opencv-python (transitive de ultralytics) → libxcb1, libgl1, libsm6, libxext6, libxrender1
+# - render OpenGL ES de opencv/mediapipe   → libgles2 (libGLESv2.so.2), libegl1 (libEGL.so.1)
 # - mediapipe → libgomp1
 # - video decoding → ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb1 \
     libgl1 \
+    libgles2 \
+    libegl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
