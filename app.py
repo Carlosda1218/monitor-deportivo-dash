@@ -8899,7 +8899,7 @@ def service_worker():
     """Service Worker para PWA — cache-first para assets, network-first para navegación."""
     from flask import Response
     sw_code = """
-const CACHE_NAME = 'combatiq-v4';
+const CACHE_NAME = 'combatiq-v5-20260529';
 
 // Assets estáticos que se precargan en install
 const PRECACHE_ASSETS = [
