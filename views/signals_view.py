@@ -7060,10 +7060,10 @@ class SignalsView:
                     ]),
                     # ── Chamber angle TKD-only ────────────────────────────────
                     *([
-                        html.H5("⚡ Cámara de pateo (TKD)", style={"margin": "12px 0 6px", "color": "var(--neon)"}),
+                        html.H5("⚡ Cámara y velocidad de pateo · WT", style={"margin": "12px 0 6px", "color": "var(--neon)"}),
                         html.P(
-                            "Ángulo de rodilla al momento de máxima flexión pre-extensión. "
-                            "Referencia WT élite: < 85° (pierna dominante).",
+                            "Ángulo de rodilla en máxima flexión antes de la extensión (chamber) y velocidad de tobillo al impacto. "
+                            "Referencia élite WT: cámara < 85° y velocidad ≥ 10 m/s en Dollyo-chagi competitivo.",
                             className="text-muted",
                             style={"fontSize": "12px", "marginBottom": "8px"},
                         ),
@@ -7071,34 +7071,34 @@ class SignalsView:
                             _metric_card(
                                 "Cámara pierna izq",
                                 f"{metrics.get('chamber_min_l') or '--'}°",
-                                f"{metrics.get('kick_count_l') or 0} kick(s)",
+                                f"{metrics.get('kick_count_l') or 0} patada(s)",
                             ),
                             _metric_card(
                                 "Cámara pierna der",
                                 f"{metrics.get('chamber_min_r') or '--'}°",
-                                f"{metrics.get('kick_count_r') or 0} kick(s)",
+                                f"{metrics.get('kick_count_r') or 0} patada(s)",
                             ),
                             _metric_card(
-                                "Total kicks",
+                                "Patadas detectadas",
                                 str((metrics.get('kick_count_l') or 0) + (metrics.get('kick_count_r') or 0)),
-                                "Eventos detectados",
+                                "Eventos en el video",
                             ),
                         ]),
                         html.Div(className="kpis session-kpis", style={"marginTop": "8px"}, children=[
                             _metric_card(
                                 "Velocidad pico izq",
                                 f"{metrics.get('kick_speed_max_l') or '--'} m/s",
-                                "Tobillo en extensión",
+                                "Tobillo en impacto",
                             ),
                             _metric_card(
                                 "Velocidad pico der",
                                 f"{metrics.get('kick_speed_max_r') or '--'} m/s",
-                                "Tobillo en extensión",
+                                "Tobillo en impacto",
                             ),
                             _metric_card(
                                 "Ref. WT élite",
                                 "≥ 10 m/s",
-                                "Dollyo-chagi competición",
+                                "Dollyo competición",
                             ),
                         ]),
                     ] if biomech.get("sport") == "taekwondo" and

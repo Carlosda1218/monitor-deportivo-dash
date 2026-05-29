@@ -230,7 +230,7 @@ def _home_rec_banner(today_row, score, sport):
         color, icon = "var(--neon)", "▲"
         label = "Listo para exigencia alta"
         if sport_key == "taekwondo":
-            text = "Sparring técnico o simulación de combate — tienes explosividad y energía para sostenerlo."
+            text = "Kyorugi con peto y contacto — tienes piernas y explosividad para sostener rondas a ritmo de competición."
         elif sport_key == "boxeo":
             text = "Saco de potencia y sparring técnico — buen día para medir timing bajo carga real."
         else:
@@ -239,7 +239,7 @@ def _home_rec_banner(today_row, score, sport):
         color, icon = "#f0a832", "●"
         label = "Intensidad controlada"
         if sport_key == "taekwondo":
-            text = "Técnica de patada con calidad — distancia y precisión sobre explosividad hoy."
+            text = "Patada técnica en distancia — dollyo y bandal con precisión, sin contacto pleno hoy."
         elif sport_key == "boxeo":
             text = "Sombra técnica y saco al 75% — buena sesión para trabajar guardia y esquivas."
         else:
@@ -248,7 +248,7 @@ def _home_rec_banner(today_row, score, sport):
         color, icon = "#e45a5a", "▼"
         label = "Ajusta la carga hoy"
         if sport_key == "taekwondo":
-            text = "Técnica suave sin contacto — evita exigencia de explosividad máxima."
+            text = "Sin contacto en peto — trabajo de Poomsae o pateo en peteca, cuida cadera y rodilla."
         elif sport_key == "boxeo":
             text = "Sombra técnica lenta, sin saco de potencia — cuida tus muñecas y hombros."
         else:
@@ -257,7 +257,7 @@ def _home_rec_banner(today_row, score, sport):
         color, icon = "var(--punch)", "⚠"
         label = "Recuperación prioritaria"
         if sport_key == "taekwondo":
-            text = "Sin impacto hoy — movilidad, estiramientos y habla con tu coach antes de entrenar."
+            text = "Sin tatami hoy — movilidad de cadera, estiramiento de isquiosurales y habla con tu coach antes de patear."
         elif sport_key == "boxeo":
             text = "Sin guantes hoy — movilidad articular y recuperación activa."
         else:
@@ -569,11 +569,11 @@ def layout():
         team = _coach_team_summary(user_id, sport=sport)
         _sport_key = _norm_sport(sport)
         if _sport_key == "taekwondo":
-            hero_copy = "Revisa quién llega con energía para patear y quién necesita un día más controlado."
+            hero_copy = "Revisa quién llega con piernas para Kyorugi y quién necesita técnica controlada hoy."
             flow_items = [
-                _flow_item("1", "Revisa el foco del día", "Detecta quién llega con menos explosividad o molestias en tren inferior.", "/usuarios"),
-                _flow_item("2", "Abre la sesión", "Define si hoy toca trabajar distancia, entrada-salida o simulación de combate.", "/sesion"),
-                _flow_item("3", "Baja a detalle si hace falta", "Usa análisis e histórico solo cuando aporten a la decisión táctica.", "/comparar"),
+                _flow_item("1", "Revisa el foco del día", "Detecta quién llega sin explosividad, con molestias de cadera o rodilla, o con baja recuperación.", "/usuarios"),
+                _flow_item("2", "Abre la sesión", "Define si toca distancia y bandal, entrada-salida con contraataque, o simulación de combate con peto.", "/sesion"),
+                _flow_item("3", "Baja a detalle si hace falta", "Usa análisis biomecánico (cámara y velocidad de pateo) e histórico para decisiones tácticas.", "/comparar"),
             ]
         elif _sport_key == "boxeo":
             hero_copy = "Revisa quién llega con manos libres y si el equipo aguanta otro bloque de alta intensidad."
@@ -687,11 +687,11 @@ def layout():
         checkins_7d = _count_checkins_7d(user_id, _qs_rows)
         _sport_key = _norm_sport(sport)
         if _sport_key == "taekwondo":
-            hero_copy = "Revisa si llegas explosivo y sin molestias antes del primer round de hoy."
+            hero_copy = "Revisa si llegas con piernas frescas y sin molestias antes del entrenamiento de hoy."
             flow_items = [
-                _flow_item("1", "Mira tu estado", "Ve si llegas con piernas, sin fatiga y listo para patear a ritmo.", "/dashboard"),
-                _flow_item("2", "Abre tu sesión", "Ajusta el trabajo de distancia y patadas al objetivo del día.", "/sesion"),
-                _flow_item("3", "Compara cuando lo necesites", "Confirma tendencias de explosividad antes de un bloque competitivo.", "/comparar"),
+                _flow_item("1", "Mira tu estado", "Comprueba fatiga de pierna, recuperación y carga acumulada antes de subir al tatami.", "/dashboard"),
+                _flow_item("2", "Abre tu sesión", "Define el foco: distancia y bandal, contraataque o trabajo de Poomsae.", "/sesion"),
+                _flow_item("3", "Compara cuando lo necesites", "Confirma tendencias de explosividad y precisión antes de un torneo o selectivo.", "/comparar"),
             ]
         elif _sport_key == "boxeo":
             hero_copy = "Revisa si llegas con manos libres y carga manejable antes de subir al saco."
