@@ -35,12 +35,13 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # IMPORTANTE: --preload obligatorio para Dash con --workers 1
-# gevent monkey-patch va a tomar efecto al import de app.py (linea 1)
+# Usamos gthread (sync con threads) en lugar de gevent porque gevent
+# rompe la conexion SSL de httpx que usa el SDK de Anthropic (causaba
+# ConnectionError silencioso al generar lecturas IA).
 CMD gunicorn app:server \
     --bind 0.0.0.0:$PORT \
     --workers 1 \
-    --worker-class gevent \
-    --worker-connections 100 \
+    --threads 8 \
     --timeout 300 \
     --preload \
     --log-level info

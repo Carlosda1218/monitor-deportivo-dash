@@ -1,14 +1,9 @@
-﻿# ── GEVENT MONKEY-PATCH — DEBE ser la primera importación del archivo ─────────
-# Convierte stdlib (socket, ssl, threading, time.sleep, etc) en cooperativos.
-# Sin esto, los HTTP calls a Anthropic/Supabase bloquean el thread del worker
-# y la app se congela para todos los usuarios mientras se ejecuta cualquier IA.
-# En local Windows con Python desktop puede fallar el import — silenciamos para
-# no romper el dev; en Railway (Linux + gunicorn gevent worker) siempre carga OK.
-try:
-    from gevent import monkey as _gevent_monkey
-    _gevent_monkey.patch_all()
-except Exception:
-    pass
+﻿# ── NOTA: gevent monkey-patch DESACTIVADO (2026-05-29) ────────────────────────
+# Razón: rompía la conexión SSL del SDK de Anthropic (httpx) en producción.
+# El SDK levantaba ConnectionError silenciosamente al hacer messages.create().
+# Mantener gevent en requirements (por si se necesita en futuro), pero NO usar
+# el monkey-patch. gunicorn vuelve a usar gthread worker (sync con threads).
+# El lag mejora con migración a EU (no con gevent).
 
 import os, io, base64, json, csv, webbrowser, importlib, traceback, urllib.parse, random, logging
 from threading import Timer

@@ -5,7 +5,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# El CMD del Dockerfile maneja gunicorn con --worker-class gevent
+# El CMD del Dockerfile maneja gunicorn (gthread, no gevent — ver Dockerfile)
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
