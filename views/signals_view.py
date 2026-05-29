@@ -5188,17 +5188,34 @@ class SignalsView:
             if not row:
                 raise PreventUpdate
 
+            # Fallback común si CSV no existe / error lectura — usar métricas guardadas
+            def _stored_kpis_fallback():
+                try:
+                    stored = db.get_latest_ecg_metrics_for_file(int(fid))
+                except Exception:
+                    stored = None
+                if stored and stored.get("bpm"):
+                    return (
+                        empty_figure(message="Señal no disponible · usando métricas guardadas", height=320),
+                        kpi_grid_ecg(
+                            float(stored.get("bpm")   or 0.0),
+                            float(stored.get("sdnn")  or 0.0),
+                            float(stored.get("rmssd") or 0.0),
+                        ),
+                    )
+                return go.Figure(), kpi_grid_ecg(0.0, 0.0, 0.0)
+
             path = _ecg_data_path(row["filename"])
             if not path:
-                return go.Figure(), kpi_grid_ecg(0.0, 0.0, 0.0)
+                return _stored_kpis_fallback()
 
             try:
                 t, x, fs = _cached_read_ecg_csv(path, fs_default=row.get("fs", 250))
             except Exception:
-                return go.Figure(), kpi_grid_ecg(0.0, 0.0, 0.0)
+                return _stored_kpis_fallback()
 
             if x is None or len(x) == 0:
-                return go.Figure(), kpi_grid_ecg(0.0, 0.0, 0.0)
+                return _stored_kpis_fallback()
 
             xs, peaks = _cached_ecg_process(path, x, fs, smooth_ms or 0, sens or 0.6)
             show_r = "r" in (showr_list or [])
