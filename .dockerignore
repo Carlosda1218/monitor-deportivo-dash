@@ -8,6 +8,10 @@ data/uploads/
 data/uploads_legacy/
 data/uploads_quarantine_*/
 data/ecg/
+!data/ecg/
+!data/ecg/*.csv
+!data/ecg/*.json
+!data/ecg/*.png
 *.db
 *.db-wal
 *.db-shm
