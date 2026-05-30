@@ -3249,6 +3249,7 @@ class SignalsView:
                 raise PreventUpdate
             if session_id and _get_authorized_session(session_id):
                 ecg_pts = _load_replay_ecg_points(session_id) or ecg_pts
+            ecg_pts = _real_sensor_points(ecg_pts)
             if not ecg_pts:
                 raise PreventUpdate
             from flask import session as _fsess
@@ -3299,6 +3300,7 @@ class SignalsView:
                 raise PreventUpdate
             if session_id and _get_authorized_session(session_id):
                 imu_pts = _load_replay_imu_points(session_id) or imu_pts
+            imu_pts = _real_sensor_points(imu_pts)
             if not imu_pts:
                 raise PreventUpdate
             from flask import session as _fsess
@@ -3841,7 +3843,7 @@ class SignalsView:
             os.path.dirname(os.path.abspath(__file__)), "..", "data", "ecg"
         )
 
-        def _sensor_status_badge(has_ecg: bool, has_imu: bool) -> html.Div:
+        def _sensor_status_badge(has_ecg: bool, has_imu: bool, summary_only: bool = False) -> html.Div:
             if has_ecg or has_imu:
                 tags = []
                 if has_ecg:
@@ -3854,6 +3856,12 @@ class SignalsView:
                     tags.append(html.Span("📡 IMU", style={
                         "background": "rgba(39,201,143,0.15)",
                         "color": "var(--green)", "borderRadius": "6px",
+                        "padding": "2px 8px", "fontSize": "11px",
+                        "fontWeight": "600"}))
+                if summary_only:
+                    tags.append(html.Span("resumen guardado", style={
+                        "background": "rgba(240,168,50,0.14)",
+                        "color": "var(--amber)", "borderRadius": "6px",
                         "padding": "2px 8px", "fontSize": "11px",
                         "fontWeight": "600"}))
                 return html.Div(
@@ -3905,9 +3913,12 @@ class SignalsView:
                 return [], [], True, empty_status, 0.0, []
             ecg_full = _load_replay_ecg_points(session_id)
             imu_full = _load_replay_imu_points(session_id)
+            summaries = _session_sensor_summary(session_id)
             # Keep browser stores small enough to avoid freezes on long sessions.
-            ecg_pts = _decimate_points(ecg_full, 6000)
-            imu_pts = _decimate_points(imu_full, 2500)
+            ecg_pts = _decimate_points(ecg_full, 6000) if ecg_full else _summary_store("ecg", summaries.get("ecg"))
+            imu_pts = _decimate_points(imu_full, 2500) if imu_full else _summary_store("imu", summaries.get("imu"))
+            ecg_real = _real_sensor_points(ecg_pts)
+            imu_real = _real_sensor_points(imu_pts)
             # Auto-sync: offset = primer instante con actividad ECG significativa
             time_offset = 0.0
             if ecg_full:
@@ -3924,9 +3935,17 @@ class SignalsView:
                 imu_times = [p.get("t", 0) for p in imu_full]
                 time_offset = round(max(0.0, min(imu_times)), 2)
             has_video = bool((video_store or {}).get("url"))
-            poll_disabled = not (bool(ecg_full or imu_full) and has_video)
-            status = _sensor_status_badge(bool(ecg_full), bool(imu_full))
-            auto_anns = _generate_auto_annotations(ecg_pts, imu_pts)
+            poll_disabled = not (bool(ecg_real or imu_real) and has_video)
+            summary_only = bool(
+                (not ecg_real and summaries.get("ecg")) or
+                (not imu_real and summaries.get("imu"))
+            )
+            status = _sensor_status_badge(
+                bool(ecg_real or summaries.get("ecg")),
+                bool(imu_real or summaries.get("imu")),
+                summary_only=summary_only,
+            )
+            auto_anns = _generate_auto_annotations(ecg_real, imu_real)
             return ecg_pts, imu_pts, poll_disabled, status, time_offset, auto_anns
 
         @app.callback(
@@ -3954,10 +3973,23 @@ class SignalsView:
             else:
                 band_shapes = [_cursor_placeholder]
 
+            ecg_summary = _summary_payload(ecg_pts, "ecg")
+            imu_summary = _summary_payload(imu_pts, "imu")
+            ecg_real = _real_sensor_points(ecg_pts)
+            imu_real = _real_sensor_points(imu_pts)
+
             # ── ECG figure ────────────────────────────────────────────────
-            if ecg_pts:
-                xs = [p["t"] for p in ecg_pts]
-                ys = [p["y"] for p in ecg_pts]
+            if ecg_summary:
+                ecg_fig = empty_figure(
+                    message=(
+                        f"Resumen ECG guardado · {ecg_summary.get('bpm', 0):.0f} bpm · "
+                        f"SDNN {ecg_summary.get('sdnn', 0):.0f} ms"
+                    ),
+                    height=180,
+                )
+            elif ecg_real:
+                xs = [p["t"] for p in ecg_real]
+                ys = [p["y"] for p in ecg_real]
                 ecg_fig = go.Figure(go.Scatter(
                     x=xs, y=ys, mode="lines",
                     line={"color": "#27c98f", "width": 1.2},
@@ -3980,9 +4012,17 @@ class SignalsView:
                 "recibido": "#e45a5a",
                 "ruido":    "rgba(143,163,191,0.35)",
             }
-            if imu_pts:
+            if imu_summary:
+                imu_fig = empty_figure(
+                    message=(
+                        f"Resumen IMU guardado · {imu_summary.get('n_hits', 0)} eventos · "
+                        f"{imu_summary.get('mean_int_g', 0):.1f} g medio"
+                    ),
+                    height=160,
+                )
+            elif imu_real:
                 traces = {}
-                for pt in imu_pts:
+                for pt in imu_real:
                     htype = pt.get("type", "ruido")
                     if htype not in traces:
                         traces[htype] = {"xs": [], "ys": []}
@@ -4008,7 +4048,7 @@ class SignalsView:
                 margin={"t": 4, "b": 24, "l": 28, "r": 8},
                 xaxis_title="t (s)",
                 yaxis_title="g",
-                showlegend=bool(imu_pts),
+                showlegend=bool(imu_real),
                 legend={"font": {"size": 9}, "orientation": "h",
                         "y": 1.12, "x": 0},
                 xaxis={"fixedrange": True},
@@ -4276,6 +4316,73 @@ class SignalsView:
             if sampled and sampled[-1] != points[-1]:
                 sampled.append(points[-1])
             return sampled
+
+        def _summary_num(value, default=0.0):
+            try:
+                return float(value)
+            except Exception:
+                return default
+
+        def _session_sensor_summary(session_id: int) -> dict:
+            """Fallback Railway: DB metrics may exist even when local files do not."""
+            summary = {"ecg": None, "imu": None}
+            sid = _safe_int(session_id)
+            if not sid or not _get_authorized_session(sid):
+                return summary
+            try:
+                ecg_files = db.list_ecg_files_by_session(int(sid)) or []
+                if ecg_files:
+                    ecg_file = ecg_files[0]
+                    metrics = db.get_latest_ecg_metrics_for_file(int(ecg_file.get("id"))) or {}
+                    if metrics and metrics.get("bpm"):
+                        summary["ecg"] = {
+                            "source": "summary",
+                            "bpm": _summary_num(metrics.get("bpm")),
+                            "sdnn": _summary_num(metrics.get("sdnn")),
+                            "rmssd": _summary_num(metrics.get("rmssd")),
+                            "n_peaks": int(_summary_num(metrics.get("n_peaks"), 0)),
+                            "filename": ecg_file.get("filename") or "",
+                        }
+            except Exception:
+                pass
+            try:
+                imu_rows = db.list_imu_metrics_by_session(int(sid)) or []
+                if imu_rows:
+                    imu_row = imu_rows[0]
+                    if imu_row.get("n_hits") is not None:
+                        summary["imu"] = {
+                            "source": "summary",
+                            "n_hits": int(_summary_num(imu_row.get("n_hits"), 0)),
+                            "hits_per_min": _summary_num(imu_row.get("hits_per_min")),
+                            "mean_int_g": _summary_num(imu_row.get("mean_int_g")),
+                            "max_int_g": _summary_num(imu_row.get("max_int_g")),
+                            "filename": imu_row.get("filename") or "",
+                        }
+            except Exception:
+                pass
+            return summary
+
+        def _summary_store(kind: str, payload: dict | None) -> list:
+            if not payload:
+                return []
+            data = dict(payload)
+            data.update({"summary_only": True, "kind": kind})
+            return [data]
+
+        def _summary_payload(points, kind: str | None = None):
+            if not points or not isinstance(points, list):
+                return None
+            first = points[0] if points else None
+            if not isinstance(first, dict) or not first.get("summary_only"):
+                return None
+            if kind and first.get("kind") != kind:
+                return None
+            return first
+
+        def _real_sensor_points(points):
+            if _summary_payload(points):
+                return []
+            return points or []
 
         def _load_replay_ecg_points(session_id: int) -> list:
             if not _get_authorized_session(session_id):
